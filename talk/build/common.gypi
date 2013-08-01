@@ -36,13 +36,19 @@
     # flood of chromium-style warnings.
     'clang_use_chrome_plugins%': 0,
     'libpeer_target_type%': 'static_library',
+    
+    # TODO(henrike): make sure waterfall bots have $JAVA_HOME configured
+    # properly and remove the default value below. See issue 2113.
+    'java_home%': '<!(python -c "import os; print os.getenv(\'JAVA_HOME\', \'/usr/lib/jvm/jdk1.6.0_45\');")',
+    # Whether or not to build the ObjectiveC PeerConnection API & tests.
     'conditions': [
-      ['OS=="android" or OS=="linux"', {
-        # TODO(henrike): make sure waterfall bots have $JAVA_HOME configured
-        # properly and remove the default value below. See issue 2113.
-        'java_home%': '<!(python -c "import os; dir=os.getenv(\'JAVA_HOME\', \'/usr/lib/jvm/java-6-sun\'); assert os.path.exists(os.path.join(dir, \'include/jni.h\')), \'Point \\$JAVA_HOME or the java_home gyp variable to a directory containing include/jni.h!\'; print dir")',
-      }],
-    ],
+	    ['OS=="android" or OS=="linux"', {
+                     # TODO(henrike): make sure waterfall bots have $JAVA_HOME configured
+                     # properly and remove the default value below. See issue 2113.
+		    'java_home%': '<!(python -c "import os; dir=os.getenv(\'JAVA_HOME\', \'/usr/lib/jvm/jdk1.6.0_45\'); assert os.path.exists(os.path.join(dir, \'include/jni.h\')), \'Point \\$JAVA_HOME or the java_home gyp variable to a directory containing include/jni.h!\'; print dir")',
+	    }],
+    ], 
+    'libjingle_objc%' : 0,
   },
   'target_defaults': {
     'include_dirs': [

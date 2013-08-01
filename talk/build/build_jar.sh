@@ -38,6 +38,8 @@ JAR_NAME="$1"; shift
 TMP_DIR="$1"; shift
 CLASSPATH="$1"; shift
 
+echo JAVA_HOME set to $JAVA_HOME
+
 if [ -z "$1" ]; then
   echo "Usage: $0 jar-name temp-work-dir source-path-dir .so-to-bundle " \
     "classpath path/to/Source1.java path/to/Source2.java ..." >&2

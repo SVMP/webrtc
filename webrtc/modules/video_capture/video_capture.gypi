@@ -94,6 +94,12 @@
               'dependencies': [
                 '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
                 '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
+	    },
+            }]],  # android
+	    # specific Android variants
+            ['OS=="android" and (android_app_abi=="armeabi" or android_app_abi=="armeabi-v7a") ', {
+              'include_dirs': [
+                'android',
               ],
               'sources': [
                 'android/device_info_android.cc',
@@ -101,8 +107,20 @@
                 'android/video_capture_android.cc',
                 'android/video_capture_android.h',
               ],
-            }],  # android
-            ['OS=="ios"', {
+            }],  # android ARM
+            ['OS=="android" and android_app_abi=="x86"', {
+              'include_dirs': [
+                'android',
+              ],
+              'sources': [                
+                'svmp/device_info_svmp.cc',  
+                'svmp/device_info_svmp.h',
+                'svmp/svmp_common.h',
+                'svmp/video_capture_svmp.cc',
+                'svmp/video_capture_svmp.h'
+              ],
+            }],  # android x86
+	    ['OS=="ios"', {
               'sources': [
                 'ios/device_info_ios.h',
                 'ios/device_info_ios.mm',

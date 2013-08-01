@@ -156,19 +156,19 @@
     #     },  # target call
     #   ], # targets
     # }],  # OS!="android"
-    ['OS=="linux" or OS=="win"', {
+    ['OS=="linux" or OS=="win" or (OS=="android" and android_app_abi=="x86") ', {
       'targets': [
         {
           'target_name': 'peerconnection_client',
           'type': 'executable',
-          'sources': [
-            'examples/peerconnection/client/conductor.cc',
-            'examples/peerconnection/client/conductor.h',
-            'examples/peerconnection/client/defaults.cc',
-            'examples/peerconnection/client/defaults.h',
-            'examples/peerconnection/client/peer_connection_client.cc',
-            'examples/peerconnection/client/peer_connection_client.h',
-          ],
+          #'sources': [
+            #'examples/peerconnection/client/conductor.cc',
+            #'examples/peerconnection/client/conductor.h',
+            #'examples/peerconnection/client/defaults.cc',
+            #'examples/peerconnection/client/defaults.h',
+            #'examples/peerconnection/client/peer_connection_client.cc',
+            #'examples/peerconnection/client/peer_connection_client.h',
+          #],
           'dependencies': [
             '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
             'libjingle.gyp:libjingle_peerconnection',
@@ -182,6 +182,13 @@
                 'examples/peerconnection/client/main.cc',
                 'examples/peerconnection/client/main_wnd.cc',
                 'examples/peerconnection/client/main_wnd.h',
+		# import from above
+		'examples/peerconnection/client/conductor.cc',
+		'examples/peerconnection/client/conductor.h',
+		'examples/peerconnection/client/defaults.cc',
+		'examples/peerconnection/client/defaults.h',
+		'examples/peerconnection/client/peer_connection_client.cc',
+		'examples/peerconnection/client/peer_connection_client.h',
               ],
               'msvs_settings': {
                 'VCLinkerTool': {
@@ -194,6 +201,13 @@
                 'examples/peerconnection/client/linux/main.cc',
                 'examples/peerconnection/client/linux/main_wnd.cc',
                 'examples/peerconnection/client/linux/main_wnd.h',
+		# import from above
+		'examples/peerconnection/client/conductor.cc',
+		'examples/peerconnection/client/conductor.h',
+		'examples/peerconnection/client/defaults.cc',
+		'examples/peerconnection/client/defaults.h',
+		'examples/peerconnection/client/peer_connection_client.cc',
+		'examples/peerconnection/client/peer_connection_client.h',
               ],
               'cflags': [
                 '<!@(pkg-config --cflags glib-2.0 gobject-2.0 gtk+-2.0)',
@@ -213,10 +227,46 @@
                 ],
               },
             }],  # OS=="linux"
-          ],  # conditions
-        },  # target peerconnection_client
-      ], # targets
-    }],  # OS=="linux" or OS=="win"
+       ['OS=="android" and android_app_abi=="x86"', {
+              'target_name': 'svmp-fbstream-webrtc',
+              'type': 'executable',
+              'sources': [
+              'examples/peerconnection/client/svmp/svmp_conductor.cc',
+              'examples/peerconnection/client/svmp/svmp_defaults.cc',
+              'examples/peerconnection/client/peer_connection_client.cc',
+              'examples/peerconnection/client/peer_connection_client.h',
+		      'examples/peerconnection/client/svmp/main.cc',
+		      #'examples/peerconnection/client/svmp/main_wnd.cc',
+              ],
+              'dependencies': [
+                 '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
+                 'libjingle.gyp:libjingle_peerconnection',
+              ],
+              'cflags': [
+                #'<!@(pkg-config --cflags glib-2.0 gobject-2.0 gtk+-2.0)',
+              ],
+              'link_settings': {
+                'ldflags': [
+                  #'<!@(pkg-config --libs-only-L --libs-only-other glib-2.0'
+                   #   ' gobject-2.0 gthread-2.0 gtk+-2.0)',
+                ],
+                'libraries': [
+                  #'<!@(pkg-config --libs-only-l glib-2.0 gobject-2.0'
+                      #' gthread-2.0 gtk+-2.0)',
+                  #'-lX11',
+                  #'-lXcomposite',
+                  #'-lXext',
+                  #'-lXrender',
+                ],
+              },
+         }],
+
+            ],  # conditions
+          },  # target peerconnection_client
+         ], # targets
+       }],  # OS=="linux" or OS=="win"
+
+
 
     ['OS=="ios"', {
       'targets': [
