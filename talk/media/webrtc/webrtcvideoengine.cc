@@ -827,7 +827,8 @@ void WebRtcVideoEngine::Construct(ViEWrapper* vie_wrapper,
   vie_wrapper_.reset(vie_wrapper);
   vie_wrapper_base_initialized_ = false;
   tracing_.reset(tracing);
-  voice_engine_ = voice_engine;
+  //voice_engine_ = voice_engine;
+  voice_engine_ = NULL;
   initialized_ = false;
   SetTraceFilter(SeverityToFilter(kDefaultLogSeverity));
   render_module_.reset(new WebRtcPassthroughRender());

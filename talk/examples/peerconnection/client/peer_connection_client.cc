@@ -167,7 +167,9 @@ void PeerConnectionClient::DoConnect() {
   bool ret = ConnectControlSocket();
   if (ret)
     state_ = SIGNING_IN;
+    printf ("STATE== SIGNING_IN");
   if (!ret) {
+	  printf("oops ConnectionFailure");
     callback_->OnServerConnectionFailure();
   }
 }
@@ -257,6 +259,7 @@ void PeerConnectionClient::OnConnect(talk_base::AsyncSocket* socket) {
   size_t sent = socket->Send(onconnect_data_.c_str(), onconnect_data_.length());
   ASSERT(sent == onconnect_data_.length());
   UNUSED(sent);
+  printf("Connected!\n");
   onconnect_data_.clear();
 }
 
@@ -348,6 +351,7 @@ bool PeerConnectionClient::ReadIntoBuffer(talk_base::AsyncSocket* socket,
 }
 
 void PeerConnectionClient::OnRead(talk_base::AsyncSocket* socket) {
+	printf("OnRead Event\n");
   size_t content_length = 0;
   if (ReadIntoBuffer(socket, &control_data_, &content_length)) {
     size_t peer_id = 0, eoh = 0;
@@ -356,6 +360,7 @@ void PeerConnectionClient::OnRead(talk_base::AsyncSocket* socket) {
     if (ok) {
       if (my_id_ == -1) {
         // First response.  Let's store our server assigned ID.
+    	printf("OnRead State == Signing_in\n");
         ASSERT(state_ == SIGNING_IN);
         my_id_ = static_cast<int>(peer_id);
         ASSERT(my_id_ != -1);
@@ -400,6 +405,7 @@ void PeerConnectionClient::OnRead(talk_base::AsyncSocket* socket) {
 
 void PeerConnectionClient::OnHangingGetRead(talk_base::AsyncSocket* socket) {
   LOG(INFO) << __FUNCTION__;
+  printf("OnHangingRead Event\n");
   size_t content_length = 0;
   if (ReadIntoBuffer(socket, &notification_data_, &content_length)) {
     size_t peer_id = 0, eoh = 0;

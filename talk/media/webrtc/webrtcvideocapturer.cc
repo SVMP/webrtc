@@ -59,6 +59,7 @@ static kVideoFourCCEntry kSupportedFourCCs[] = {
   { FOURCC_MJPG, webrtc::kVideoMJPEG },  // compressed, slow conversion.
   { FOURCC_ARGB, webrtc::kVideoARGB },   // 32 bpp, slow conversion.
   { FOURCC_24BG, webrtc::kVideoRGB24 },  // 24 bpp, slow conversion.
+  { FOURCC_RGBP, webrtc::kVideoRGB565},  // For Virtual Frame Buffer support
 };
 
 class WebRtcVcmFactory : public WebRtcVcmFactoryInterface {
@@ -162,6 +163,7 @@ bool WebRtcVideoCapturer::Init(const Device& device) {
                             vcm_id, ARRAY_SIZE(vcm_id)) != -1) {
       if (device.name == reinterpret_cast<char*>(vcm_name)) {
         found = true;
+	    LOG(LS_WARNING) << "found video capture device name :"<< device.name;
         break;
       }
     }

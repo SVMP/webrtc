@@ -40,8 +40,8 @@ int32_t DeviceInfoImpl::NumberOfCapabilities(
                                         const char* deviceUniqueIdUTF8)
 {
 
-    if (!deviceUniqueIdUTF8)
-        return -1;
+    //if (!deviceUniqueIdUTF8)
+    //    return -1;
 
     _apiLock.AcquireLockShared();
 

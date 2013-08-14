@@ -217,10 +217,11 @@ class Thread : public MessageQueue {
   // only for testing.
   bool WrapCurrent();
   void UnwrapCurrent();
-
- protected:
   // Blocks the calling thread until this thread has terminated.
   void Join();
+ protected:
+
+
 
  private:
   // Helper class to facilitate executing a functor on a thread.

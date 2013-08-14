@@ -113,7 +113,7 @@ int32_t DeviceInfoSVMP::GetDeviceName(
 int32_t DeviceInfoSVMP::CreateCapabilityMap(
                                         const char* deviceUniqueIdUTF8)
 {
-    int fd;
+    volatile int fd;
     //char device[32];
     bool found = false;
 
@@ -162,8 +162,14 @@ int32_t DeviceInfoSVMP::CreateCapabilityMap(
 //        close(fd); // close since this is not the matching device
 //    }
 
-    fd = open("/dev/video/fb0", O_RDWR);
-    found = true;
+    fd = open("/dev/graphics/fb0", O_RDWR);
+    if (fd == -1){
+    	 WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id, "Error opening FB device, errno");
+    	 printf("errno: %d\n",errno);
+    	 found = false;
+    }else
+    	 found = true;
+
     if (!found)
     {
         WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id, "no matching device found");

@@ -6,6 +6,6 @@ export WEBRTC_SKIP_RESOURCES_DOWNLOAD=1
 #. build/android/envsetup.sh --target-arch=x86
 GYP_GENERATOR_OUTPUT="out_linux" gclient runhooks --force
 
-ninja -C out_linux/out/Debug -j 4  peerconnection_server
-ninja -C out_linux/out/Debug -j 4  peerconnection_client
+ninja $1 -C out_linux/out/Debug -j 4  peerconnection_server
+ninja $1 -C out_linux/out/Debug -j 4   peerconnection_client
 #ninja -C out/Release -j 4  All

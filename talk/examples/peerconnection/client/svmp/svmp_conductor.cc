@@ -417,7 +417,7 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
       DeletePeerConnection();
 
       ASSERT(active_streams_.empty());
-
+      printf("PEER connection closed!!\n");
 //      if (main_wnd_->IsWindow()) {
 //        if (client_->is_connected()) {
 //          main_wnd_->SwitchToPeerList(client_->peers());
@@ -465,6 +465,7 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
       webrtc::MediaStreamInterface* stream =
           reinterpret_cast<webrtc::MediaStreamInterface*>(
           data);
+
 //      webrtc::VideoTrackVector tracks = stream->GetVideoTracks();
 //      // Only render the first track.
 //      if (!tracks.empty()) {
@@ -499,6 +500,7 @@ void Conductor::OnSuccess(webrtc::SessionDescriptionInterface* desc) {
   std::string sdp;
   desc->ToString(&sdp);
   jmessage[kSessionDescriptionSdpName] = sdp;
+  printf("On Success\n");
   SendMessage(writer.write(jmessage));
 }
 
@@ -508,5 +510,6 @@ void Conductor::OnFailure(const std::string& error) {
 
 void Conductor::SendMessage(const std::string& json_object) {
   std::string* msg = new std::string(json_object);
+  printf("SendMessage: %s\n",msg->c_str());
   UIThreadCallback(SEND_MESSAGE_TO_PEER, msg);
 }

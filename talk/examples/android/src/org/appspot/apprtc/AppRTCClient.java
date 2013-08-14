@@ -279,6 +279,16 @@ public class AppRTCClient {
           iceServers, gaeBaseHref, token, postMessageUrl, initiator,
           pcConstraints, videoConstraints);
     }
+    
+//    private AppRTCSignalingParameters getParametersForRoomUrl(String url)
+//    {
+//    	ice = "stun:128.29.199.74:3478";
+//    	LinkedList<PeerConnection.IceServer> iceServers;
+//    	iceServers.add(ice);
+//    	gaeBaseHref = "http://128.29.199.74:8888";
+//    	
+//    }
+    
 
     private String getVideoConstraints(String mediaConstraintsString) {
       try {

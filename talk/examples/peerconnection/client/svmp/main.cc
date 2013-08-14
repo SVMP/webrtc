@@ -69,10 +69,10 @@ class CustomSocketServer : public talk_base::PhysicalSocketServer {
       //        gtk_main_iteration();
 
     //if (!wnd_->IsWindow() && !conductor_->connection_active() &&
-	  if (!conductor_->connection_active() &&
-        client_ != NULL && !client_->is_connected()) {
-      thread_->Quit();
-    }
+//	  if (!conductor_->connection_active() &&
+//        client_ != NULL && !client_->is_connected()) {
+//      thread_->Quit();
+//    }
     return talk_base::PhysicalSocketServer::Wait(0/*cms == -1 ? 1 : cms*/,
                                                  process_io);
   }
@@ -204,12 +204,13 @@ int main(int argc, char* argv[]) {
      // new talk_base::RefCountedObject<Conductor>(&client, &wnd));
   socket_server.set_client(&client);
   socket_server.set_conductor(conductor);
+  //socket_server.Wait();
 
 
   thread->Run();
-  //thread->Join();
 
-  printf("\nLoopback call started\n\n");
+
+  printf("\ncall started\n\n");
   printf("Press enter to stop...");
   while ((getchar()) != '\n')
 	  ;

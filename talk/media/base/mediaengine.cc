@@ -37,7 +37,7 @@ const int MediaEngineInterface::kDefaultAudioDelayOffset = 0;
 #include "talk/media/other/linphonemediaengine.h"
 #endif  // HAVE_LINPHONE
 #if defined(HAVE_WEBRTC_VOICE)
-#include "talk/media/webrtc/webrtcvoiceengine.h"
+//#include "talk/media/webrtc/webrtcvoiceengine.h"
 #endif  // HAVE_WEBRTC_VOICE
 #if defined(HAVE_WEBRTC_VIDEO)
 #include "talk/media/webrtc/webrtcvideoengine.h"

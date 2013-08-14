@@ -854,7 +854,7 @@
         'media/webrtc/webrtcvideocapturer.h',
         'media/webrtc/webrtcvideodecoderfactory.h',
         'media/webrtc/webrtcvideoencoderfactory.h',
-        'media/webrtc/webrtcvideoengine.cc',
+        #'media/webrtc/webrtcvideoengine.cc',
         'media/webrtc/webrtcvideoengine.h',
         'media/webrtc/webrtcvideoframe.cc',
         'media/webrtc/webrtcvideoframe.h',
@@ -962,6 +962,13 @@
         ['OS=="android"', {
           'sources': [
             'media/devices/mobiledevicemanager.cc',
+	    'media/webrtc/webrtcvideoengine.cc',
+	    #'media/webrtc/webrtcvideoengine-svmp.cc',
+          ],
+        }],
+        ['OS=="linux"', {
+          'sources': [
+	    'media/webrtc/webrtcvideoengine.cc',
           ],
         }],
       ],

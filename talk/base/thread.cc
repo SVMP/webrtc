@@ -511,6 +511,7 @@ bool Thread::ProcessMessages(int cmsLoop) {
       }
     }
   }
+  printf("!!!! Done Processing messages!!\n");
 }
 
 bool Thread::WrapCurrent() {
