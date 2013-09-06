@@ -265,7 +265,9 @@ int32_t VideoCaptureModuleV4L2::StartCapture(
 	    // initialize current width and height
 	    _currentWidth = video_fmt.fmt.pix.width;
 	    _currentHeight = video_fmt.fmt.pix.height;
-	    _captureDelay = 120;
+	    //_captureDelay = 120;
+	    //_captureDelay = 120;
+	    _captureDelay = 10;
 
 	    // Trying to set frame rate, before check driver capability.
 	    bool driver_framerate_support = true;

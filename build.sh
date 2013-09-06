@@ -8,4 +8,9 @@ gclient runhooks
 
 #ninja -C out/Debug -j 4  All
 ninja -C out/Debug -j 4 svmp-fbstream-webrtc
+ninja -C out/Release -j 4 svmp-fbstream-webrtc
+
+cp out/Debug/svmp-fbstream-webrtc out/Debug/svmp-fbstream-webrtc-dbg
+strip out/Debug/svmp-fbstream-webrtc
+strip out/Release/svmp-fbstream-webrtc
 #ninja -C out/Release -j 4  All

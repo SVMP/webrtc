@@ -962,8 +962,8 @@
         ['OS=="android"', {
           'sources': [
             'media/devices/mobiledevicemanager.cc',
-	    'media/webrtc/webrtcvideoengine.cc',
-	    #'media/webrtc/webrtcvideoengine-svmp.cc',
+	    #'media/webrtc/webrtcvideoengine.cc',
+	    'media/webrtc/webrtcvideoengine-svmp.cc',
           ],
         }],
         ['OS=="linux"', {

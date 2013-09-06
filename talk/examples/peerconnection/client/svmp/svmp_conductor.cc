@@ -367,6 +367,7 @@ cricket::VideoCapturer* Conductor::OpenVideoCaptureDevice() {
 }
 
 void Conductor::AddStreams() {
+
   if (active_streams_.find(kStreamLabel) != active_streams_.end())
     return;  // Already added.
 
@@ -426,6 +427,7 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
 //        }
 //      } else {
       DisconnectFromServer();
+      exit(1);
       //}
       break;
 

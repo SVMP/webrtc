@@ -68,6 +68,8 @@ class CustomSocketServer : public talk_base::PhysicalSocketServer {
       //while (gtk_events_pending())
       //        gtk_main_iteration();
 
+	 sleep(.6);
+
     //if (!wnd_->IsWindow() && !conductor_->connection_active() &&
 //	  if (!conductor_->connection_active() &&
 //        client_ != NULL && !client_->is_connected()) {
@@ -183,7 +185,6 @@ int main(int argc, char* argv[]) {
     return -1;
   }
 
-  //asdf
    printf ("FLAG_server: %s, FLAG_PORT %d\n",FLAG_server,FLAG_port);
 
 
@@ -204,7 +205,10 @@ int main(int argc, char* argv[]) {
      // new talk_base::RefCountedObject<Conductor>(&client, &wnd));
   socket_server.set_client(&client);
   socket_server.set_conductor(conductor);
+
+
   //socket_server.Wait();
+
 
 
   thread->Run();
