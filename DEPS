@@ -55,6 +55,7 @@ deps = {
 
   "third_party/jsoncpp/source":
     (Var("sourceforge_url") % {"repo": "jsoncpp"}) + "/trunk/jsoncpp@248",
+   # "http://svn.sourceforge.net/p/jsoncpp/code/trunk/jsoncpp@248",
 
   "third_party/junit/":
     (Var("googlecode_url") % "webrtc") + "/deps/third_party/junit@3367",
