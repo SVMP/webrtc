@@ -251,7 +251,7 @@ int32_t DeviceInfoSVMP::FillCapabilityMap(int fd)
     VideoCaptureCapability *cap = new VideoCaptureCapability();
     cap->width = fb_data.var.xres;
     cap->height = fb_data.var.yres;
-    cap->expectedCaptureDelay = 120;
+    cap->expectedCaptureDelay = 30;
     int fmts = 0;
     if (videoFormats[fmts] == V4L2_PIX_FMT_YUYV)
     {

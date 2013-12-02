@@ -16,6 +16,28 @@
 #include "common_types.h"
 #include "../video_capture_impl.h"
 
+// Android stuff
+#include <gui/DisplayEventReceiver.h>
+#include <utils/Looper.h>
+
+namespace android
+{
+
+class MyEventReceiver:  public DisplayEventReceiver {
+	public:
+	MyEventReceiver();
+	~MyEventReceiver();
+	void setCapture(void *myobj);
+	static bool doCapture();
+
+	private:
+	static void *obj;
+
+};
+
+
+}
+
 namespace webrtc
 {
 class CriticalSectionWrapper;
@@ -32,12 +54,16 @@ public:
     virtual int32_t StopCapture();
     virtual bool CaptureStarted();
     virtual int32_t CaptureSettings(VideoCaptureCapability& settings);
+    bool CaptureProcessAsync();
+    bool CaptureProcess();
 
 private:
     enum {kNoOfV4L2Bufffers=4};
 
     static bool CaptureThread(void*);
-    bool CaptureProcess();
+    static bool CaptureThreadAsync(void*);
+
+
     bool AllocateVideoBuffers();
     bool DeAllocateVideoBuffers();
 

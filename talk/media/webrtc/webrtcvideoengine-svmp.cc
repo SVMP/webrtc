@@ -87,10 +87,18 @@ namespace cricket {
 
 static const int kDefaultLogSeverity = talk_base::LS_WARNING;
 
+// original
 static const int kMinVideoBitrate = 50;
 static const int kStartVideoBitrate = 300;
 static const int kMaxVideoBitrate = 2000;
+
+//const int kMinVideoBitrate = 1000;
+//static const int kStartVideoBitrate = 2000;
+//static const int kMaxVideoBitrate = 2000;
+
+
 static const int kDefaultConferenceModeMaxVideoBitrate = 500;
+
 
 static const int kVideoMtu = 1200;
 
@@ -522,6 +530,10 @@ class WebRtcVideoChannelSendInfo  {
     }
     capturer_updated_ = true;
     video_capturer_ = video_capturer;
+    if (video_capturer->IsScreencast()){
+    	LOG(LS_ERROR) << "IsSCreencast!!\n\n";
+    }
+
     if (video_capturer && !video_capturer->IsScreencast()) {
       const VideoFormat* capture_format = video_capturer->GetCaptureFormat();
       if (capture_format) {
@@ -2581,6 +2593,7 @@ bool WebRtcVideoMediaChannel::GetRenderer(uint32 ssrc,
 
 void WebRtcVideoMediaChannel::AdaptAndSendFrame(VideoCapturer* capturer,
                                                 const VideoFrame* frame) {
+
   if (capturer->IsScreencast()) {
     // Do not adapt frames that are screencast.
     SendFrame(capturer, frame);

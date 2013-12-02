@@ -111,8 +111,24 @@
             ['OS=="android" and android_app_abi=="x86"', {
               'include_dirs': [
                 'android',
+                '/home/apyles/svmp-422/frameworks/native/include',                
+                '/home/apyles/svmp-422/system/core/include',
               ],
+              'cflags': [
+              '-Wno-multichar',
+              ],
+              'ldflags': [
+                '-L /home/apyles/svmp-422/out/target/product/svmp/system/lib/',              	
+              ],
+              'libraries': [
+                  '-lcutils',
+                  '-lutils', 
+                  '-lbinder',
+                  '-lui',
+                  '-lgui',
+                ],
               'sources': [                
+                'svmp/device_info_svmp.cc',
                 'svmp/device_info_svmp.cc',  
                 'svmp/device_info_svmp.h',
                 'svmp/svmp_common.h',

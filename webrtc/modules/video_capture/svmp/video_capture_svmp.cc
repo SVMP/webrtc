@@ -8,6 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#define LOG_TAG "fbstream_webrtc"
+
 #include "video_capture_android.h"
 
 #include <sys/ioctl.h>
@@ -30,6 +32,29 @@
 #include "critical_section_wrapper.h"
 #include "svmp_common.h"
 #include "video_capture_svmp.h"
+
+// Android stuff
+#include <gui/DisplayEventReceiver.h>
+#include <utils/Looper.h>
+using namespace android;
+
+namespace android
+{
+
+
+void *MyEventReceiver::obj;
+
+MyEventReceiver::MyEventReceiver(){}
+MyEventReceiver::~MyEventReceiver(){}
+void MyEventReceiver::setCapture(void *myobj)
+{
+	obj = myobj;
+}
+bool MyEventReceiver::doCapture(){
+	return static_cast<webrtc::videocapturemodule::VideoCaptureModuleV4L2*> (obj)->CaptureProcess();
+}
+
+}
 
 namespace webrtc
 {
@@ -113,55 +138,7 @@ int32_t VideoCaptureModuleV4L2::Init(const char* deviceUniqueIdUTF8)
 
 }
 
-//
-//int32_t VideoCaptureModuleV4L2::Init(const char* deviceUniqueIdUTF8)
-//{
-//    int len = strlen((const char*) deviceUniqueIdUTF8);
-//    _deviceUniqueId = new (std::nothrow) char[len + 1];
-//    if (_deviceUniqueId)
-//    {
-//        memcpy(_deviceUniqueId, deviceUniqueIdUTF8, len + 1);
-//    }
-//
-//    int fd;
-//    char device[32];
-//    bool found = false;
-//
-//    /* detect /dev/video [0-63] entries */
-//    /* detect /dev/graphics/fb [0-63] entries */
-//    int n;
-//    for (n = 0; n < 1; n++)
-//    {
-//        sprintf(device, "/dev/graphics/fb%d", n);
-//        if ((fd = open(device, O_RDONLY)) != -1)
-//        {
-//            // query device capabilities
-//            struct v4l2_capability cap;
-//            if (ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0)
-//            {
-//                if (cap.bus_info[0] != 0)
-//                {
-//                    if (strncmp((const char*) cap.bus_info,
-//                                (const char*) deviceUniqueIdUTF8,
-//                                strlen((const char*) deviceUniqueIdUTF8)) == 0) //match with device id
-//                    {
-//                        close(fd);
-//                        found = true;
-//                        break; // fd matches with device unique id supplied
-//                    }
-//                }
-//            }
-//            close(fd); // close since this is not the matching device
-//        }
-//    }
-//    if (!found)
-//    {
-//        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id, "no matching device found");
-//        return -1;
-//    }
-//    _deviceId = n; //store the device id
-//    return 0;
-//}
+
 
 VideoCaptureModuleV4L2::~VideoCaptureModuleV4L2()
 {
@@ -265,9 +242,7 @@ int32_t VideoCaptureModuleV4L2::StartCapture(
 	    // initialize current width and height
 	    _currentWidth = video_fmt.fmt.pix.width;
 	    _currentHeight = video_fmt.fmt.pix.height;
-	    //_captureDelay = 120;
-	    //_captureDelay = 120;
-	    _captureDelay = 10;
+	    _captureDelay = 120;
 
 	    // Trying to set frame rate, before check driver capability.
 	    bool driver_framerate_support = true;
@@ -286,6 +261,8 @@ int32_t VideoCaptureModuleV4L2::StartCapture(
 	        _currentFrameRate = 30;
 	      }
 	    }
+	    WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,"Framerate: setting framerate to %d", _currentFrameRate);
+
 
 	    if (!AllocateVideoBuffers())
 	    {
@@ -298,9 +275,10 @@ int32_t VideoCaptureModuleV4L2::StartCapture(
 	    if (!_captureThread)
 	    {
 	        _captureThread = ThreadWrapper::CreateThread(
-	            VideoCaptureModuleV4L2::CaptureThread, this, kHighPriority);
+	            VideoCaptureModuleV4L2::CaptureThreadAsync, this, kHighPriority);
 	        unsigned int id;
 	        _captureThread->Start(id);
+
 	    }
 
 	    // Needed to start UVC camera - from the uvcview application
@@ -319,184 +297,7 @@ int32_t VideoCaptureModuleV4L2::StartCapture(
 
 }
 
-//
-//int32_t VideoCaptureModuleV4L2::StartCapture2(
-//    const VideoCaptureCapability& capability)
-//{
-//    if (_captureStarted)
-//    {
-//        if (capability.width == _currentWidth &&
-//            capability.height == _currentHeight &&
-//            _captureVideoType == capability.rawType)
-//        {
-//            return 0;
-//        }
-//        else
-//        {
-//            StopCapture();
-//        }
-//    }
-//
-//    CriticalSectionScoped cs(_captureCritSect);
-//    //first open /dev/video device
-//    char device[20];
-//    //sprintf(device, "/dev/video%d", (int) _deviceId);
-//    sprintf(device, "/dev/graphics/fb%d", _deviceId);
-//    if ((_deviceFd = open(device, O_RDWR | O_NONBLOCK, 0)) < 0)
-//    {
-//        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-//                   "error in opening %s errono = %d", device, errno);
-//        return -1;
-//    }
-//
-//    // Supported video formats in preferred order.
-//    // If the requested resolution is larger than VGA, we prefer MJPEG. Go for
-//    // I420 otherwise.
-//    const int nFormats = 4;
-//    unsigned int fmts[nFormats];
-//    if (capability.width > 640 || capability.height > 480) {
-//        fmts[0] = V4L2_PIX_FMT_MJPEG;
-//        fmts[1] = V4L2_PIX_FMT_YUV420;
-//        fmts[2] = V4L2_PIX_FMT_YUYV;
-//        fmts[3] = V4L2_PIX_FMT_JPEG;
-//    } else {
-//        fmts[0] = V4L2_PIX_FMT_YUV420;
-//        fmts[1] = V4L2_PIX_FMT_YUYV;
-//        fmts[2] = V4L2_PIX_FMT_MJPEG;
-//        fmts[3] = V4L2_PIX_FMT_JPEG;
-//    }
-//
-//
-//    // Enumerate image formats.
-//    struct v4l2_fmtdesc fmt;
-//    int fmtsIdx = nFormats;
-//    memset(&fmt, 0, sizeof(fmt));
-//    fmt.index = 0;
-//    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//    WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id,
-//                 "Video Capture enumerats supported image formats:");
-//    while (ioctl(_deviceFd, VIDIOC_ENUM_FMT, &fmt) == 0) {
-//        WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id,
-//                     "  { pixelformat = %c%c%c%c, description = '%s' }",
-//                     fmt.pixelformat & 0xFF, (fmt.pixelformat>>8) & 0xFF,
-//                     (fmt.pixelformat>>16) & 0xFF, (fmt.pixelformat>>24) & 0xFF,
-//                     fmt.description);
-//        // Match the preferred order.
-//        for (int i = 0; i < nFormats; i++) {
-//            if (fmt.pixelformat == fmts[i] && i < fmtsIdx)
-//                fmtsIdx = i;
-//        }
-//        // Keep enumerating.
-//        fmt.index++;
-//    }
-//
-//    if (fmtsIdx == nFormats)
-//    {
-//        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-//                     "no supporting video formats found");
-//        return -1;
-//    } else {
-//        WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id,
-//                     "We prefer format %c%c%c%c",
-//                     fmts[fmtsIdx] & 0xFF, (fmts[fmtsIdx]>>8) & 0xFF,
-//                     (fmts[fmtsIdx]>>16) & 0xFF, (fmts[fmtsIdx]>>24) & 0xFF);
-//    }
-//
-//    struct v4l2_format video_fmt;
-//    memset(&video_fmt, 0, sizeof(struct v4l2_format));
-//    video_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//    video_fmt.fmt.pix.sizeimage = 0;
-//    video_fmt.fmt.pix.width = capability.width;
-//    video_fmt.fmt.pix.height = capability.height;
-//    video_fmt.fmt.pix.pixelformat = fmts[fmtsIdx];
-//
-//    if (video_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV)
-//        _captureVideoType = kVideoYUY2;
-//    else if (video_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUV420)
-//        _captureVideoType = kVideoI420;
-//    else if (video_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_MJPEG ||
-//             video_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_JPEG)
-//        _captureVideoType = kVideoMJPEG;
-//
-//    //set format and frame size now
-//    if (ioctl(_deviceFd, VIDIOC_S_FMT, &video_fmt) < 0)
-//    {
-//        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-//                   "error in VIDIOC_S_FMT, errno = %d", errno);
-//        return -1;
-//    }
-//
-//    // initialize current width and height
-//    _currentWidth = video_fmt.fmt.pix.width;
-//    _currentHeight = video_fmt.fmt.pix.height;
-//    _captureDelay = 120;
-//
-//    // Trying to set frame rate, before check driver capability.
-//    bool driver_framerate_support = true;
-//    struct v4l2_streamparm streamparms;
-//    memset(&streamparms, 0, sizeof(streamparms));
-//    streamparms.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//    if (ioctl(_deviceFd, VIDIOC_G_PARM, &streamparms) < 0) {
-//        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-//                   "error in VIDIOC_G_PARM errno = %d", errno);
-//        driver_framerate_support = false;
-//      // continue
-//    } else {
-//      // check the capability flag is set to V4L2_CAP_TIMEPERFRAME.
-//      if (streamparms.parm.capture.capability == V4L2_CAP_TIMEPERFRAME) {
-//        // driver supports the feature. Set required framerate.
-//        memset(&streamparms, 0, sizeof(streamparms));
-//        streamparms.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//        streamparms.parm.capture.timeperframe.numerator = 1;
-//        streamparms.parm.capture.timeperframe.denominator = capability.maxFPS;
-//        if (ioctl(_deviceFd, VIDIOC_S_PARM, &streamparms) < 0) {
-//          WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-//                   "Failed to set the framerate. errno=%d", errno);
-//          driver_framerate_support = false;
-//        } else {
-//          _currentFrameRate = capability.maxFPS;
-//        }
-//      }
-//    }
-//    // If driver doesn't support framerate control, need to hardcode.
-//    // Hardcoding the value based on the frame size.
-//    if (!driver_framerate_support) {
-//      if(_currentWidth >= 800 && _captureVideoType != kVideoMJPEG) {
-//        _currentFrameRate = 15;
-//      } else {
-//        _currentFrameRate = 30;
-//      }
-//    }
-//
-//    if (!AllocateVideoBuffers())
-//    {
-//        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-//                   "failed to allocate video capture buffers");
-//        return -1;
-//    }
-//
-//    //start capture thread;
-//    if (!_captureThread)
-//    {
-//        _captureThread = ThreadWrapper::CreateThread(
-//            VideoCaptureModuleV4L2::CaptureThread, this, kHighPriority);
-//        unsigned int id;
-//        _captureThread->Start(id);
-//    }
-//
-//    // Needed to start UVC camera - from the uvcview application
-//    enum v4l2_buf_type type;
-//    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//    if (ioctl(_deviceFd, VIDIOC_STREAMON, &type) == -1)
-//    {
-//        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-//                     "Failed to turn on stream");
-//        return -1;
-//    }
-//
-//    _captureStarted = true;
-//    return 0;
-//}
+
 
 int32_t VideoCaptureModuleV4L2::StopCapture()
 {
@@ -558,62 +359,6 @@ bool VideoCaptureModuleV4L2::AllocateVideoBuffers()
 }
 
 
-//bool VideoCaptureModuleV4L2::AllocateVideoBuffers()
-//{
-//    struct v4l2_requestbuffers rbuffer;
-//    memset(&rbuffer, 0, sizeof(v4l2_requestbuffers));
-//
-//    rbuffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//    rbuffer.memory = V4L2_MEMORY_MMAP;
-//    rbuffer.count = kNoOfV4L2Bufffers;
-//
-//    if (ioctl(_deviceFd, VIDIOC_REQBUFS, &rbuffer) < 0)
-//    {
-//        WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-//                   "Could not get buffers from device. errno = %d", errno);
-//        return false;
-//    }
-//
-//    if (rbuffer.count > kNoOfV4L2Bufffers)
-//        rbuffer.count = kNoOfV4L2Bufffers;
-//
-//    _buffersAllocatedByDevice = rbuffer.count;
-//
-//    //Map the buffers
-//    _pool = new Buffer[rbuffer.count];
-//
-//    for (unsigned int i = 0; i < rbuffer.count; i++)
-//    {
-//        struct v4l2_buffer buffer;
-//        memset(&buffer, 0, sizeof(v4l2_buffer));
-//        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//        buffer.memory = V4L2_MEMORY_MMAP;
-//        buffer.index = i;
-//
-//        if (ioctl(_deviceFd, VIDIOC_QUERYBUF, &buffer) < 0)
-//        {
-//            return false;
-//        }
-//
-//        _pool[i].start = mmap(NULL, buffer.length, PROT_READ | PROT_WRITE, MAP_SHARED,
-//                              _deviceFd, buffer.m.offset);
-//
-//        if (MAP_FAILED == _pool[i].start)
-//        {
-//            for (unsigned int j = 0; j < i; j++)
-//                munmap(_pool[j].start, _pool[j].length);
-//            return false;
-//        }
-//
-//        _pool[i].length = buffer.length;
-//
-//        if (ioctl(_deviceFd, VIDIOC_QBUF, &buffer) < 0)
-//        {
-//            return false;
-//        }
-//    }
-//    return true;
-//}
 
 bool VideoCaptureModuleV4L2::DeAllocateVideoBuffers()
 {
@@ -644,11 +389,104 @@ bool VideoCaptureModuleV4L2::CaptureThread(void* obj)
 {
     return static_cast<VideoCaptureModuleV4L2*> (obj)->CaptureProcess();
 }
+
+bool VideoCaptureModuleV4L2::CaptureThreadAsync(void* obj)
+{
+    return static_cast<VideoCaptureModuleV4L2*> (obj)->CaptureProcessAsync();
+}
+
+
+
+
+
+
+int receiver(int fd, int events, void* data)
+{
+    //DisplayEventReceiver* q = (DisplayEventReceiver*)data;
+	MyEventReceiver* q = (MyEventReceiver*)data;
+
+    ssize_t n;
+    //DisplayEventReceiver::Event buffer[1];
+    MyEventReceiver::Event buffer[1];
+
+   //static nsecs_t oldTimeStamp = 0;
+   //static nsecs_t before = 0;
+   //static nsecs_t after = 0;
+
+    while ((n = q->getEvents(buffer, 1)) > 0) {
+        for (int i=0 ; i<n ; i++) {
+        	//if (buffer[i].header.type == DisplayEventReceiver::DISPLAY_EVENT_VSYNC) {
+            if (buffer[i].header.type == MyEventReceiver::DISPLAY_EVENT_VSYNC) {
+            	//before = systemTime(SYSTEM_TIME_MONOTONIC);
+            	q->doCapture();
+            	//after = systemTime(SYSTEM_TIME_MONOTONIC);
+            	//float t = float(after - before) / s2ns(1);
+            	//ALOGE("capture thread took: %f ms (%f Hz)\n", t*1000, 1.0/t);
+                //ALOGE("event vsync: count=%d\t", buffer[i].vsync.count);
+            }
+//            if (oldTimeStamp) {
+//                float t = float(buffer[i].header.timestamp - oldTimeStamp) / s2ns(1);
+//                printf("%f ms (%f Hz)\n", t*1000, 1.0/t);
+//            }
+//           oldTimeStamp = buffer[i].header.timestamp;
+        }
+    }
+    if (n<0) {
+        printf("error reading events (%s)\n", strerror(-n));
+    }
+
+    return 1;
+}
+
+
+bool VideoCaptureModuleV4L2::CaptureProcessAsync()
+{
+	//return true;
+	//DisplayEventReceiver myDisplayEvent;
+	android::MyEventReceiver myDisplayEvent;
+
+	myDisplayEvent.setCapture(this);
+
+	sp<Looper> loop = new Looper(false);
+	loop->addFd(myDisplayEvent.getFd(), 0, ALOOPER_EVENT_INPUT, receiver,
+			&myDisplayEvent);
+
+	// set rate to 30 hz ( skip every other event )
+	myDisplayEvent.setVsyncRate(2);
+
+
+	do {
+		//printf("about to poll...\n");
+		int32_t ret = loop->pollOnce(-1);
+		switch (ret) {
+		case ALOOPER_POLL_WAKE:
+			//("ALOOPER_POLL_WAKE\n");
+			break;
+		case ALOOPER_POLL_CALLBACK:
+			//("ALOOPER_POLL_CALLBACK\n");
+			break;
+		case ALOOPER_POLL_TIMEOUT:
+			printf("ALOOPER_POLL_TIMEOUT\n");
+			break;
+		case ALOOPER_POLL_ERROR:
+			printf("ALOOPER_POLL_TIMEOUT\n");
+			break;
+		default:
+			printf("ugh? poll returned %d\n", ret);
+			break;
+		}
+	} while (1);
+	return true;
+}
+
+
+
 bool VideoCaptureModuleV4L2::CaptureProcess()
 {
     int retVal = 0;
     fd_set rSet;
     struct timeval timeout;
+
 
     _captureCritSect->Enter();
 
@@ -707,6 +545,7 @@ bool VideoCaptureModuleV4L2::CaptureProcess()
         // convert to to I420 if needed
         //IncomingFrame((unsigned char*) _pool[buf.index].start,
         IncomingFrame((unsigned char*) _pool[0].start,buf.bytesused, frameInfo);
+
         // enqueue the buffer again
 //        if (ioctl(_deviceFd, VIDIOC_QBUF, &buf) == -1)
 //        {

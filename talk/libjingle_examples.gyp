@@ -235,7 +235,7 @@
               'examples/peerconnection/client/svmp/svmp_defaults.cc',
               'examples/peerconnection/client/peer_connection_client.cc',
               'examples/peerconnection/client/peer_connection_client.h',
-		      'examples/peerconnection/client/svmp/main.cc',
+	      'examples/peerconnection/client/svmp/main.cc',
 		      #'examples/peerconnection/client/svmp/main_wnd.cc',
               ],
               'dependencies': [
@@ -247,17 +247,20 @@
               ],
               'link_settings': {
                 'ldflags': [
-                  #'<!@(pkg-config --libs-only-L --libs-only-other glib-2.0'
-                   #   ' gobject-2.0 gthread-2.0 gtk+-2.0)',
+                   # TODO figure out a better way to include Android library path
+                   '-L /home/apyles/svmp-422/out/target/product/svmp/system/lib/',
                 ],
                 'libraries': [
-                  #'<!@(pkg-config --libs-only-l glib-2.0 gobject-2.0'
-                      #' gthread-2.0 gtk+-2.0)',
-                  #'-lX11',
-                  #'-lXcomposite',
-                  #'-lXext',
-                  #'-lXrender',
+                 # Include Android libraries
+		 '-lcutils',
+		 '-lutils', 
+		 '-lbinder',
+		 '-lui',
+		 '-lgui',
                 ],
+                
+                
+                
               },
          }],
 

@@ -128,9 +128,15 @@
       ['build_with_libjingle==1', {
         'include_tests%': 0,
         'enable_tracing%': 0,
+        'include_tests%': 1,
+        'enable_tracing%': 1,
+        'enable_android_opensl%': 1,
       }, {
         'include_tests%': 1,
         'enable_tracing%': 1,
+        # Switch between Android audio device OpenSL ES implementation
+        # and Java Implementation
+        'enable_android_opensl%': 1,
       }],
       ['OS=="ios"', {
         'build_libjpeg%': 0,
