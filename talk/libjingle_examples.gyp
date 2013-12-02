@@ -248,7 +248,7 @@
               'link_settings': {
                 'ldflags': [
                    # TODO figure out a better way to include Android library path
-                   '-L /home/apyles/svmp-422/out/target/product/svmp/system/lib/',
+                   '-L <(DEPTH)/third_party/android_tools/aosp/out/target/product/svmp/system/lib/',
                 ],
                 'libraries': [
                  # Include Android libraries
