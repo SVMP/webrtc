@@ -70,6 +70,22 @@
                 ],
               },
             }],
+	    ['OS=="android" and android_app_abi=="x86"', {
+	    'link_settings': {
+		    'ldflags': [
+			    # Link to Android library path
+			    '-L <(aosp_root)/out/target/product/svmp/system/lib/',
+		    ],
+		    'libraries': [
+                    # Include Android libraries
+		    '-lcutils',
+		    '-lutils', 
+		    '-lbinder',
+		    '-lui',
+		    '-lgui',
+		    ],
+		},
+	    }],
           ],
         },
         {

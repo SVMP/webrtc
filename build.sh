@@ -10,8 +10,7 @@ gclient runhooks
 ninja -C out/Debug -j 4 svmp-fbstream-webrtc
 cp out/Debug/svmp-fbstream-webrtc out/Debug/svmp-fbstream-webrtc-dbg
 strip out/Debug/svmp-fbstream-webrtc
-exit
-#ninja -C out/Release -j 4 svmp-fbstream-webrtc
+ninja -C out/Release -j 4 svmp-fbstream-webrtc
 ninja -C out/Debug -j 4 libjingle_peerconnection_so
 ninja -C out/Debug -j 4 libjingle_peerconnection_jar
 ninja -C out/Release -j 4 libjingle_peerconnection_so
