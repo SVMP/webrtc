@@ -111,14 +111,14 @@
             ['OS=="android" and android_app_abi=="x86"', {
               'include_dirs': [
                 'android',
-                '<(webrtc_root)/../third_party/android_tools/aosp/frameworks/native/include',
-                '<(webrtc_root)/../third_party/android_tools/aosp/system/core/include',
+                '<(aosp_root)/frameworks/native/include',
+                '<(aosp_root)/system/core/include',
               ],
               'cflags': [
               '-Wno-multichar',
               ],
               'ldflags': [
-                '-L <(webrtc_root)/../third_party/android_tools/aosp/out/target/product/svmp/system/lib/',              	
+                '-L <(aosp_root)/out/target/product/svmp/system/lib/',
               ],
               'libraries': [
                   '-lcutils',

@@ -19,7 +19,6 @@
           'build_with_chromium%': 1,
         },
         'build_with_chromium%': '<(build_with_chromium)',
-
         'conditions': [
           ['build_with_chromium==1', {
             'build_with_libjingle': 1,
@@ -37,6 +36,7 @@
       'build_with_chromium%': '<(build_with_chromium)',
       'build_with_libjingle%': '<(build_with_libjingle)',
       'webrtc_root%': '<(webrtc_root)',
+      'aosp_root%': '<!(cd <(DEPTH) && pwd -P)/third_party/android_tools/aosp/',
       'apk_tests_path%': '<(apk_tests_path)',
       'modules_java_gyp_path%': '<(modules_java_gyp_path)',
 
@@ -47,6 +47,7 @@
     'build_with_chromium%': '<(build_with_chromium)',
     'build_with_libjingle%': '<(build_with_libjingle)',
     'webrtc_root%': '<(webrtc_root)',
+    'aosp_root%': '<(aosp_root)',
     'apk_tests_path%': '<(apk_tests_path)',
     'modules_java_gyp_path%': '<(modules_java_gyp_path)',
     'webrtc_vp8_dir%': '<(webrtc_vp8_dir)',

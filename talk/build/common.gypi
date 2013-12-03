@@ -29,7 +29,8 @@
 
 {
   'variables': {
-    'webrtc_root%': '<(DEPTH)/webrtc',
+   'webrtc_root%': '<(DEPTH)/webrtc',
+   'aosp_root%': '<!(cd <(DEPTH) && pwd -P)/third_party/android_tools/aosp/',
     # TODO(ronghuawu): Chromium build will need a different libjingle_root.
     'libjingle_root%': '<(DEPTH)',
     # TODO(ronghuawu): For now, disable the Chrome plugins, which causes a
