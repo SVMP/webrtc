@@ -39,11 +39,6 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-//#include <cutils/sockets.h>
-#include "/home/apyles/apyles/svmp-aosp/system/core/include/cutils/sockets.h"
-#include <android/log.h>
-
-
 
 #include "talk/base/thread.h"
 
