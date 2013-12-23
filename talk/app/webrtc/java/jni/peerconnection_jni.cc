@@ -1082,10 +1082,25 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
     return -1;
   g_class_reference_holder = new ClassReferenceHolder(jni);
 
+#ifdef ANDROID
+  webrtc::Trace::CreateTrace();
+  /*CHECK(!webrtc::Trace::SetTraceFile("/sdcard/trace.txt", false),
+        "SetTraceFile failed");
+  CHECK(!webrtc::Trace::SetLevelFilter(webrtc::kTraceAll),
+        "SetLevelFilter failed");*/
+#endif  // ANDROID
+
+  // Uncomment to get sensitive logs emitted (to stderr or logcat).
+  // talk_base::LogMessage::LogToDebug(talk_base::LS_SENSITIVE);
+
   return JNI_VERSION_1_6;
 }
 
 extern "C" void JNIEXPORT JNICALL JNI_OnUnLoad(JavaVM *jvm, void *reserved) {
+<<<<<<< HEAD
+=======
+  //webrtc::Trace::ReturnTrace();
+>>>>>>> 73c4aab... loop through all devices to find one
   delete g_class_reference_holder;
   g_class_reference_holder = NULL;
   CHECK(talk_base::CleanupSSL(), "Failed to CleanupSSL()");
@@ -1528,6 +1543,36 @@ JOW(jobject, MediaSource_nativeState)(JNIEnv* jni, jclass, jlong j_p) {
   talk_base::scoped_refptr<MediaSourceInterface> p(
       reinterpret_cast<MediaSourceInterface*>(j_p));
   return JavaEnumFromIndex(jni, "MediaSource$State", p->state());
+}
+
+JOW(jlong, VideoCapturer_nativeFindVideoCapturer)(
+    JNIEnv* jni, jclass)
+{
+    talk_base::scoped_ptr<cricket::DeviceManagerInterface> dev_manager(
+        cricket::DeviceManagerFactory::Create());
+
+    CHECK(dev_manager->Init(), "DeviceManager::Init() failed");
+
+    std::vector<cricket::Device> devs;
+    if (!dev_manager->GetVideoCaptureDevices(&devs))
+    {
+        LOG(LS_ERROR) << "GetVideoCaptureDevices failed";
+        return 0;
+    }
+
+    std::vector<cricket::Device>::iterator dev_it = devs.begin();
+    // Maybe use a scoped_ptr here?
+    cricket::VideoCapturer* capturer = NULL;
+    for (; dev_it != devs.end(); ++dev_it)
+    {
+        capturer = dev_manager->CreateVideoCapturer(*dev_it);
+        if (capturer != NULL)
+            break;
+    }
+
+    talk_base::scoped_ptr<cricket::VideoCapturer> cap(capturer);
+
+    return (jlong)cap.release();
 }
 
 JOW(jlong, VideoCapturer_nativeCreateVideoCapturer)(

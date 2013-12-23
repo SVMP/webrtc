@@ -35,6 +35,16 @@ public class VideoCapturer {
     this.nativeVideoCapturer = nativeVideoCapturer;
   }
 
+  public static VideoCapturer create()
+  {
+    long nativeVideoCapturer = nativeFindVideoCapturer();
+    if (nativeVideoCapturer == 0)
+    {
+      return null;
+    }
+    return new VideoCapturer(nativeVideoCapturer);
+  }
+
   public static VideoCapturer create(String deviceName) {
     long nativeVideoCapturer = nativeCreateVideoCapturer(deviceName);
     if (nativeVideoCapturer == 0) {
@@ -62,6 +72,8 @@ public class VideoCapturer {
   }
 
   private static native long nativeCreateVideoCapturer(String deviceName);
+
+  private static native long nativeFindVideoCapturer();
 
   private static native void free(long nativeVideoCapturer);
 }

@@ -478,7 +478,7 @@ bool TraceImpl::Process() {
     bool write_to_file = trace_file_.Open() || callback_;
     critsect_interface_->Leave();
     if (write_to_file) {
-      WriteToFile();
+      //WriteToFile();
     }
   } else {
     CriticalSectionScoped lock(critsect_interface_);
