@@ -62,7 +62,7 @@ namespace webrtc
 #if defined(WEBRTC_ANDROID) && !defined(WEBRTC_CHROMIUM_BUILD)
 // TODO(leozwang) These SetAndroidVM apis will be refactored, thus we only
 // keep and reference java vm.
-int32_t SetCaptureAndroidVM(void* javaVM, void* javaContext) {
+int32_t SetCaptureAndroidVM(JavaVM* javaVM) {
   return 1;
 	//return videocapturemodule::VideoCaptureAndroid::SetAndroidObjects(
    //   javaVM,

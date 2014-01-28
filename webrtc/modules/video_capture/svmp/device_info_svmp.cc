@@ -178,12 +178,7 @@ int32_t DeviceInfoSVMP::CreateCapabilityMap(
 
     // now fd will point to the matching device
     // reset old capability map
-    MapItem* item = NULL;
-    while ((item = _captureCapabilities.Last()))
-    {
-        delete static_cast<VideoCaptureCapability*> (item->GetItem());
-        _captureCapabilities.Erase(item);
-    }
+    _captureCapabilities.clear();
 
     int size = FillCapabilityMap(fd);
     close(fd);
@@ -194,8 +189,8 @@ int32_t DeviceInfoSVMP::CreateCapabilityMap(
                                                    _lastUsedDeviceNameLength + 1);
     memcpy(_lastUsedDeviceName, deviceUniqueIdUTF8, _lastUsedDeviceNameLength + 1);
 
-    WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id, "CreateCapabilityMap %d",
-               _captureCapabilities.Size());
+    /*WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id, "CreateCapabilityMap %d",*/
+               //_captureCapabilities.Size());
 
     return size;
 }
@@ -248,47 +243,47 @@ int32_t DeviceInfoSVMP::FillCapabilityMap(int fd)
 	    return -1;
 
     }
-    VideoCaptureCapability *cap = new VideoCaptureCapability();
-    cap->width = fb_data.var.xres;
-    cap->height = fb_data.var.yres;
-    cap->expectedCaptureDelay = 30;
+    VideoCaptureCapability cap;
+    cap.width = fb_data.var.xres;
+    cap.height = fb_data.var.yres;
+    cap.expectedCaptureDelay = 30;
     int fmts = 0;
     if (videoFormats[fmts] == V4L2_PIX_FMT_YUYV)
     {
-	    cap->rawType = kVideoYUY2;
+	    cap.rawType = kVideoYUY2;
     }
     else if (videoFormats[fmts] == V4L2_PIX_FMT_MJPEG)
     {
-	    cap->rawType = kVideoMJPEG;
+	    cap.rawType = kVideoMJPEG;
     }
 
     else if (videoFormats[fmts] == V4L2_PIX_FMT_RGB24)
     {
-	    cap->rawType = kVideoRGB24;
+	    cap.rawType = kVideoRGB24;
     }
     else if (videoFormats[fmts] == V4L2_PIX_FMT_RGB565)
     {
-    	cap->rawType = kVideoRGB565;
+    	cap.rawType = kVideoRGB565;
     }
-    if(cap->width >= 800 && cap->rawType != kVideoMJPEG)
+    if(cap.width >= 800 && cap.rawType != kVideoMJPEG)
     {
-	    cap->maxFPS = 15;
+	    cap.maxFPS = 15;
     }
     else
     {
-	    cap->maxFPS = 30;
+	    cap.maxFPS = 30;
     }
     //int index = 0;
 
-    _captureCapabilities.Insert(0, cap);
+    _captureCapabilities.push_back(cap);
     //index++;
     WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id,
 		    "Camera capability, width:%d height:%d type:%d fps:%d",
-		    cap->width, cap->height, cap->rawType, cap->maxFPS);
+		    cap.width, cap.height, cap.rawType, cap.maxFPS);
 
     WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id, "CreateCapabilityMap %d",
-               _captureCapabilities.Size());
-    return _captureCapabilities.Size();
+	       _captureCapabilities.size());
+    return _captureCapabilities.size();
     //    int index = 0;
 //    for (int fmts = 0; fmts < totalFmts; fmts++)
 //    {
@@ -341,9 +336,9 @@ int32_t DeviceInfoSVMP::FillCapabilityMap(int fd)
 //        }
 //    }
 
-    WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id, "CreateCapabilityMap %d",
-               _captureCapabilities.Size());
-    return _captureCapabilities.Size();
+    /*WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCapture, _id, "CreateCapabilityMap %d",*/
+               /*_captureCapabilities.Size());*/
+    return _captureCapabilities.size();
 }
 
 } // namespace videocapturemodule

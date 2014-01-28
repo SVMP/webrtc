@@ -223,16 +223,16 @@ hooks = [
     "action": ["python", Var("root_dir") + "/build/win/setup_cygwin_mount.py",
                "--win-only"],
   },
-  {
-    # Download test resources, i.e. video and audio files from Google Storage.
-    "pattern": "\\.sha1",
-    "action": ["download_from_google_storage",
-               "--directory",
-               "--recursive",
-               "--num_threads=10",
-               "--bucket", "chromium-webrtc-resources",
-               Var("root_dir") + "/resources"],
-  },
+#  {
+#    # Download test resources, i.e. video and audio files from Google Storage.
+#    "pattern": "\\.sha1",
+#    "action": ["download_from_google_storage",
+#               "--directory",
+#               "--recursive",
+#               "--num_threads=10",
+#               "--bucket", "chromium-webrtc-resources",
+#               Var("root_dir") + "/resources"],
+#  },
   {
     # A change to a .gyp, .gypi, or to GYP itself should run the generator.
     "pattern": ".",

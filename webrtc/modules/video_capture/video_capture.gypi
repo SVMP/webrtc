@@ -94,8 +94,7 @@
               'dependencies': [
                 '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
                 '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
-	    },
-            }]],  # android
+            ],}],  # android
 	    # specific Android variants
             ['OS=="android" and (android_app_abi=="armeabi" or android_app_abi=="armeabi-v7a") ', {
               'include_dirs': [
