@@ -2865,7 +2865,8 @@
             'conditions' : [
               ['OS=="android"', {
                 'ldflags': [
-                  '-Wl,--no-fatal-warnings',
+                  #'-Wl,--fatal-warnings',
+		  '-WL,--no-fatal-warnings',
                   # Only link with needed input sections. This is to avoid
                   # getting undefined reference to __cxa_bad_typeid in the CDU
                   # library.
@@ -2942,7 +2943,8 @@
                   '-fomit-frame-pointer',
                 ],
                 'ldflags': [
-                  '-Wl,--fatal-warnings',
+                  #'-Wl,--fatal-warnings',
+                  '-WL,--no-fatal-warnings',
                   # Warn in case of text relocations.
                   '-Wl,--warn-shared-textrel',
                 ],
