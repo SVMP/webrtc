@@ -19,4 +19,5 @@ cp out/Debug/svmp-fbstream-webrtc out/Debug/svmp-fbstream-webrtc-dbg
 strip out/Debug/svmp-fbstream-webrtc
 strip out/Release/svmp-fbstream-webrtc
 # This is what needs to go to AOSP build.
-strip out/Release/libjingle_peerconnection_so
+strip out/Release/libjingle_peerconnection_so.so
+strip out/Debug/libjingle_peerconnection_so.so
