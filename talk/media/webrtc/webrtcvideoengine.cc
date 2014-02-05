@@ -1005,8 +1005,12 @@ bool WebRtcVideoEngine::SetDefaultCodec(const VideoCodec& codec) {
 
 WebRtcVideoMediaChannel* WebRtcVideoEngine::CreateChannel(
     VoiceMediaChannel* voice_channel) {
-  WebRtcVideoMediaChannel* channel =
-      new WebRtcVideoMediaChannel(this, voice_channel);
+  WebRtcVideoMediaChannel* channel = NULL;
+
+  if (!voice_channel)
+	  return NULL;
+
+  channel = new WebRtcVideoMediaChannel(this, voice_channel);
   if (!channel->Init()) {
     delete channel;
     channel = NULL;
@@ -1285,6 +1289,10 @@ void WebRtcVideoEngine::SetTraceOptions(const std::string& options) {
     // Write WebRTC debug output (at same loglevel) to file
     if (tracing_->SetTraceFile(tracefile->c_str()) == -1) {
       LOG_RTCERR1(SetTraceFile, *tracefile);
+    }
+  }else{
+    if (tracing_->SetTraceFile("/data/log/webrtc-debug.txt") == -1) {
+      LOG_RTCERR1(SetTraceFile, "/data/log/webrtc-debug.txt");
     }
   }
 }
