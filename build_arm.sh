@@ -1,6 +1,8 @@
 #!/bin/bash
+source build_functions.sh
 export PATH=$PATH:../depot_tools
 export WEBRTC_SKIP_RESOURCES_DOWNLOAD=1
+setconfig 0
 . build/android/envsetup.sh 
 GYP_GENERATOR_OUTPUT="out_arm" gclient runhooks --force
 
