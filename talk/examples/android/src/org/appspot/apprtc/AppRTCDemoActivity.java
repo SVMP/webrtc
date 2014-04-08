@@ -75,6 +75,7 @@ public class AppRTCDemoActivity extends Activity
   private static final String TAG = "AppRTCDemoActivity";
   private PeerConnectionFactory factory;
   private VideoSource videoSource;
+  private boolean videoSourceStopped;
   private PeerConnection pc;
   private final PCObserver pcObserver = new PCObserver();
   private final SDPObserver sdpObserver = new SDPObserver();
@@ -159,6 +160,7 @@ public class AppRTCDemoActivity extends Activity
     vsv.onPause();
     if (videoSource != null) {
       videoSource.stop();
+      videoSourceStopped = true;
     }
   }
 
@@ -166,16 +168,32 @@ public class AppRTCDemoActivity extends Activity
   public void onResume() {
     super.onResume();
     vsv.onResume();
-    if (videoSource != null) {
+    if (videoSource != null && videoSourceStopped) {
       videoSource.restart();
     }
+  }
+
+
+  // Just for fun (and to regression-test bug 2302) make sure that DataChannels
+  // can be created, queried, and disposed.
+  private static void createDataChannelToRegressionTestBug2302(
+      PeerConnection pc) {
+    DataChannel dc = pc.createDataChannel("dcLabel", new DataChannel.Init());
+    abortUnless("dcLabel".equals(dc.label()), "Unexpected label corruption?");
+    dc.close();
+    dc.dispose();
   }
 
   @Override
   public void onIceServers(List<PeerConnection.IceServer> iceServers) {
     factory = new PeerConnectionFactory();
-    pc = factory.createPeerConnection(
-        iceServers, appRtcClient.pcConstraints(), pcObserver);
+
+    MediaConstraints pcConstraints = appRtcClient.pcConstraints();
+    pcConstraints.optional.add(
+        new MediaConstraints.KeyValuePair("RtpDataChannels", "true"));
+    pc = factory.createPeerConnection(iceServers, pcConstraints, pcObserver);
+
+    createDataChannelToRegressionTestBug2302(pc);  // See method comment.
 
     // Uncomment to get ALL WebRTC tracing and SENSITIVE libjingle logging.
     // NOTE: this _must_ happen while |factory| is alive!
@@ -223,7 +241,11 @@ public class AppRTCDemoActivity extends Activity
             vsv, VideoStreamsView.Endpoint.LOCAL)));
         lMS.addTrack(videoTrack);
       }
-      lMS.addTrack(factory.createAudioTrack("ARDAMSa0"));
+      if (appRtcClient.audioConstraints() != null) {
+        lMS.addTrack(factory.createAudioTrack(
+            "ARDAMSa0",
+            factory.createAudioSource(appRtcClient.audioConstraints())));
+      }
       pc.addStream(lMS, new MediaConstraints());
     }
     logAndToast("Waiting for ICE candidates...");
@@ -290,7 +312,7 @@ public class AppRTCDemoActivity extends Activity
 
   // Mangle SDP to prefer ISAC/16000 over any other audio codec.
   private String preferISAC(String sdpDescription) {
-    String[] lines = sdpDescription.split("\n");
+    String[] lines = sdpDescription.split("\r\n");
     int mLineIndex = -1;
     String isac16kRtpMap = null;
     Pattern isac16kPattern =
@@ -323,16 +345,16 @@ public class AppRTCDemoActivity extends Activity
     newMLine.append(origMLineParts[origPartIndex++]).append(" ");
     newMLine.append(origMLineParts[origPartIndex++]).append(" ");
     newMLine.append(origMLineParts[origPartIndex++]).append(" ");
-    newMLine.append(isac16kRtpMap).append(" ");
+    newMLine.append(isac16kRtpMap);
     for (; origPartIndex < origMLineParts.length; ++origPartIndex) {
       if (!origMLineParts[origPartIndex].equals(isac16kRtpMap)) {
-        newMLine.append(origMLineParts[origPartIndex]).append(" ");
+        newMLine.append(" ").append(origMLineParts[origPartIndex]);
       }
     }
     lines[mLineIndex] = newMLine.toString();
     StringBuilder newSdpDescription = new StringBuilder();
     for (String line : lines) {
-      newSdpDescription.append(line).append("\n");
+      newSdpDescription.append(line).append("\r\n");
     }
     return newSdpDescription.toString();
   }
@@ -403,6 +425,11 @@ public class AppRTCDemoActivity extends Activity
           }
         });
     }
+
+    @Override public void onRenegotiationNeeded() {
+      // No need to do anything; AppRTC follows a pre-agreed-upon
+      // signaling/negotiation protocol.
+    }
   }
 
   // Implementation detail: handle offer creation/signaling and answer setting,
@@ -411,16 +438,22 @@ public class AppRTCDemoActivity extends Activity
     @Override public void onCreateSuccess(final SessionDescription origSdp) {
       runOnUiThread(new Runnable() {
           public void run() {
-            logAndToast("Sending " + origSdp.type);
             SessionDescription sdp = new SessionDescription(
                 origSdp.type, preferISAC(origSdp.description));
-            JSONObject json = new JSONObject();
-            jsonPut(json, "type", sdp.type.canonicalForm());
-            jsonPut(json, "sdp", sdp.description);
-            sendMessage(json);
             pc.setLocalDescription(sdpObserver, sdp);
           }
         });
+    }
+
+    // Helper for sending local SDP (offer or answer, depending on role) to the
+    // other participant.
+    private void sendLocalDescription(PeerConnection pc) {
+      SessionDescription sdp = pc.getLocalDescription();
+      logAndToast("Sending " + sdp.type);
+      JSONObject json = new JSONObject();
+      jsonPut(json, "type", sdp.type.canonicalForm());
+      jsonPut(json, "sdp", sdp.description);
+      sendMessage(json);
     }
 
     @Override public void onSetSuccess() {
@@ -431,6 +464,9 @@ public class AppRTCDemoActivity extends Activity
                 // We've set our local offer and received & set the remote
                 // answer, so drain candidates.
                 drainRemoteCandidates();
+              } else {
+                // We've just set our local description so time to send it.
+                sendLocalDescription(pc);
               }
             } else {
               if (pc.getLocalDescription() == null) {
@@ -438,8 +474,9 @@ public class AppRTCDemoActivity extends Activity
                 logAndToast("Creating answer");
                 pc.createAnswer(SDPObserver.this, sdpMediaConstraints);
               } else {
-                // Sent our answer and set it as local description; drain
+                // Answer now set as local description; send it and drain
                 // candidates.
+                sendLocalDescription(pc);
                 drainRemoteCandidates();
               }
             }

@@ -171,12 +171,16 @@ public:
 
     void SendRtcpXrReceiverReferenceTime(bool enable);
 
+    bool RtcpXrReceiverReferenceTime() const;
+
     int32_t SetCSRCs(const uint32_t arrOfCSRC[kRtpCsrcSize],
                      const uint8_t arrLength);
 
     int32_t SetCSRCStatus(const bool include);
 
     void SetTargetBitrate(unsigned int target_bitrate);
+
+    void GetPacketTypeCounter(RtcpPacketTypeCounter* packet_counter) const;
 
 private:
     int32_t SendToNetwork(const uint8_t* dataBuffer, const uint16_t length);
@@ -340,10 +344,7 @@ private:
     bool                _xrSendVoIPMetric;
     RTCPVoIPMetric      _xrVoIPMetric;
 
-    // Counters
-    uint32_t      _nackCount;
-    uint32_t      _pliCount;
-    uint32_t      _fullIntraRequestCount;
+    RtcpPacketTypeCounter packet_type_counter_;
 };
 }  // namespace webrtc
 

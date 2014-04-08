@@ -36,6 +36,7 @@
 #include "talk/base/physicalsocketserver.h"
 #include "talk/base/proxyserver.h"
 #include "talk/base/socketaddress.h"
+#include "talk/base/ssladapter.h"
 #include "talk/base/thread.h"
 #include "talk/base/virtualsocketserver.h"
 #include "talk/p2p/base/p2ptransportchannel.h"
@@ -354,8 +355,11 @@ class P2PTransportChannelTestBase : public testing::Test,
   static const Result kPrflxTcpToLocalTcp;
 
   static void SetUpTestCase() {
-    // Ensure the RNG is inited.
-    talk_base::InitRandom(NULL, 0);
+    talk_base::InitializeSSL();
+  }
+
+  static void TearDownTestCase() {
+    talk_base::CleanupSSL();
   }
 
   talk_base::NATSocketServer* nat() { return nss_.get(); }
@@ -588,6 +592,46 @@ class P2PTransportChannelTestBase : public testing::Test,
     TestSendRecv(1);
   }
 
+  void TestHybridConnectivity(cricket::IceProtocolType proto) {
+    AddAddress(0, kPublicAddrs[0]);
+    AddAddress(1, kPublicAddrs[1]);
+
+    SetAllocationStepDelay(0, kMinimumStepDelay);
+    SetAllocationStepDelay(1, kMinimumStepDelay);
+
+    SetIceRole(0, cricket::ICEROLE_CONTROLLING);
+    SetIceProtocol(0, cricket::ICEPROTO_HYBRID);
+    SetIceTiebreaker(0, kTiebreaker1);
+    SetIceRole(1, cricket::ICEROLE_CONTROLLED);
+    SetIceProtocol(1, proto);
+    SetIceTiebreaker(1, kTiebreaker2);
+
+    CreateChannels(1);
+    // When channel is in hybrid and it's controlling agent, channel will
+    // receive ping request from the remote. Hence connection is readable.
+    // Since channel is in hybrid, it will not send any pings, so no writable
+    // connection. Since channel2 is in controlled state, it will not have
+    // any connections which are readable or writable, as it didn't received
+    // pings (or none) with USE-CANDIDATE attribute.
+    EXPECT_TRUE_WAIT(ep1_ch1()->readable(), 1000);
+
+    // Set real protocol type.
+    ep1_ch1()->SetIceProtocolType(proto);
+
+    // Channel should able to send ping requests and connections become writable
+    // in both directions.
+    EXPECT_TRUE_WAIT(ep1_ch1()->readable() && ep1_ch1()->writable() &&
+                     ep2_ch1()->readable() && ep2_ch1()->writable(),
+                     1000);
+    EXPECT_TRUE(
+        ep1_ch1()->best_connection() && ep2_ch1()->best_connection() &&
+        LocalCandidate(ep1_ch1())->address().EqualIPs(kPublicAddrs[0]) &&
+        RemoteCandidate(ep1_ch1())->address().EqualIPs(kPublicAddrs[1]));
+
+    TestSendRecv(1);
+    DestroyChannels();
+  }
+
   void OnChannelRequestSignaling(cricket::TransportChannelImpl* channel) {
     channel->OnSignalingReady();
   }
@@ -613,7 +657,8 @@ class P2PTransportChannelTestBase : public testing::Test,
     rch->OnCandidate(c);
   }
   void OnReadPacket(cricket::TransportChannel* channel, const char* data,
-                    size_t len, int flags) {
+                    size_t len, const talk_base::PacketTime& packet_time,
+                    int flags) {
     std::list<std::string>& packets = GetPacketList(channel);
     packets.push_front(std::string(data, len));
   }
@@ -626,7 +671,8 @@ class P2PTransportChannelTestBase : public testing::Test,
   }
   int SendData(cricket::TransportChannel* channel,
                const char* data, size_t len) {
-    return channel->SendPacket(data, len, talk_base::DSCP_NO_CHANGE, 0);
+    talk_base::PacketOptions options;
+    return channel->SendPacket(data, len, options, 0);
   }
   bool CheckDataOnChannel(cricket::TransportChannel* channel,
                           const char* data, int len) {
@@ -1034,7 +1080,7 @@ const P2PTransportChannelTest::Result*
   P2P_TEST(x, OPEN) \
   FLAKY_P2P_TEST(x, NAT_FULL_CONE) \
   FLAKY_P2P_TEST(x, NAT_ADDR_RESTRICTED) \
-  P2P_TEST(x, NAT_PORT_RESTRICTED) \
+  FLAKY_P2P_TEST(x, NAT_PORT_RESTRICTED) \
   P2P_TEST(x, NAT_SYMMETRIC) \
   FLAKY_P2P_TEST(x, NAT_DOUBLE_CONE) \
   P2P_TEST(x, NAT_SYMMETRIC_THEN_CONE) \
@@ -1081,6 +1127,7 @@ TEST_F(P2PTransportChannelTest, HandleUfragPwdChangeAsIce) {
                      cricket::ICEPROTO_RFC5245);
   CreateChannels(1);
   TestHandleIceUfragPasswordChanged();
+  DestroyChannels();
 }
 
 // Test that we restart candidate allocation when local ufrag&pwd changed.
@@ -1096,6 +1143,7 @@ TEST_F(P2PTransportChannelTest, HandleUfragPwdChangeBundleAsIce) {
 
   CreateChannels(2);
   TestHandleIceUfragPasswordChanged();
+  DestroyChannels();
 }
 
 // Test that we restart candidate allocation when local ufrag&pwd changed.
@@ -1108,6 +1156,7 @@ TEST_F(P2PTransportChannelTest, HandleUfragPwdChangeAsGice) {
                      cricket::ICEPROTO_GOOGLE);
   CreateChannels(1);
   TestHandleIceUfragPasswordChanged();
+  DestroyChannels();
 }
 
 // Test that ICE restart works when bundle is enabled.
@@ -1123,6 +1172,7 @@ TEST_F(P2PTransportChannelTest, HandleUfragPwdChangeBundleAsGice) {
 
   CreateChannels(2);
   TestHandleIceUfragPasswordChanged();
+  DestroyChannels();
 }
 
 // Test the operation of GetStats.
@@ -1388,6 +1438,19 @@ TEST_F(P2PTransportChannelTest, TestIceConfigWillPassDownToPort) {
               ep2_ch1()->best_connection());
 
   TestSendRecv(1);
+  DestroyChannels();
+}
+
+// This test verifies channel can handle ice messages when channel is in
+// hybrid mode.
+TEST_F(P2PTransportChannelTest, TestConnectivityBetweenHybridandIce) {
+  TestHybridConnectivity(cricket::ICEPROTO_RFC5245);
+}
+
+// This test verifies channel can handle Gice messages when channel is in
+// hybrid mode.
+TEST_F(P2PTransportChannelTest, TestConnectivityBetweenHybridandGice) {
+  TestHybridConnectivity(cricket::ICEPROTO_GOOGLE);
 }
 
 // Verify that we can set DSCP value and retrieve properly from P2PTC.
@@ -1497,8 +1560,11 @@ TEST_F(P2PTransportChannelMultihomedTest, DISABLED_TestBasic) {
 // Test that we can quickly switch links if an interface goes down.
 TEST_F(P2PTransportChannelMultihomedTest, TestFailover) {
   AddAddress(0, kPublicAddrs[0]);
-  AddAddress(1, kPublicAddrs[1]);
+  // Adding alternate address will make sure |kPublicAddrs| has the higher
+  // priority than others. This is due to FakeNetwork::AddInterface method.
   AddAddress(1, kAlternateAddrs[1]);
+  AddAddress(1, kPublicAddrs[1]);
+
   // Use only local ports for simplicity.
   SetAllocatorFlags(0, kOnlyLocalPorts);
   SetAllocatorFlags(1, kOnlyLocalPorts);

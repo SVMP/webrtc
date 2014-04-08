@@ -12,9 +12,9 @@
 #define WEBRTC_MODULES_AUDIO_PROCESSING_INCLUDE_AUDIO_PROCESSING_H_
 
 #include <stddef.h>  // size_t
+#include <stdio.h>  // FILE
 
 #include "webrtc/common.h"
-#include "webrtc/modules/interface/module.h"
 #include "webrtc/typedefs.h"
 
 struct AecCore;
@@ -49,10 +49,19 @@ class VoiceDetection;
 //   except when really necessary.
 struct DelayCorrection {
   DelayCorrection() : enabled(false) {}
-  DelayCorrection(bool enabled) : enabled(enabled) {}
-
+  explicit DelayCorrection(bool enabled) : enabled(enabled) {}
   bool enabled;
 };
+
+// Must be provided through AudioProcessing::Create(Confg&). It will have no
+// impact if used with AudioProcessing::SetExtraOptions().
+struct ExperimentalAgc {
+  ExperimentalAgc() : enabled(true) {}
+  explicit ExperimentalAgc(bool enabled) : enabled(enabled) {}
+  bool enabled;
+};
+
+static const int kAudioProcMaxNativeSampleRateHz = 32000;
 
 // The Audio Processing Module (APM) provides a collection of voice processing
 // components designed for real-time communications software.
@@ -88,11 +97,6 @@ struct DelayCorrection {
 //
 // Usage example, omitting error checking:
 // AudioProcessing* apm = AudioProcessing::Create(0);
-// apm->set_sample_rate_hz(32000); // Super-wideband processing.
-//
-// // Mono capture and stereo render.
-// apm->set_num_channels(1, 1);
-// apm->set_num_reverse_channels(2);
 //
 // apm->high_pass_filter()->Enable(true);
 //
@@ -131,35 +135,60 @@ struct DelayCorrection {
 // // Close the application...
 // delete apm;
 //
-class AudioProcessing : public Module {
+class AudioProcessing {
  public:
-  // Creates a APM instance, with identifier |id|. Use one instance for every
-  // primary audio stream requiring processing. On the client-side, this would
-  // typically be one instance for the near-end stream, and additional instances
-  // for each far-end stream which requires processing. On the server-side,
-  // this would typically be one instance for every incoming stream.
+  enum ChannelLayout {
+    kMono,
+    // Left, right.
+    kStereo,
+    // Mono, keyboard mic.
+    kMonoAndKeyboard,
+    // Left, right, keyboard mic.
+    kStereoAndKeyboard
+  };
+
+  // Creates an APM instance. Use one instance for every primary audio stream
+  // requiring processing. On the client-side, this would typically be one
+  // instance for the near-end stream, and additional instances for each far-end
+  // stream which requires processing. On the server-side, this would typically
+  // be one instance for every incoming stream.
+  static AudioProcessing* Create();
+  // Allows passing in an optional configuration at create-time.
+  static AudioProcessing* Create(const Config& config);
+  // TODO(ajm): Deprecated; remove all calls to it.
   static AudioProcessing* Create(int id);
   virtual ~AudioProcessing() {}
 
   // Initializes internal states, while retaining all user settings. This
   // should be called before beginning to process a new audio stream. However,
   // it is not necessary to call before processing the first stream after
-  // creation.
-  //
-  // set_sample_rate_hz(), set_num_channels() and set_num_reverse_channels()
-  // will trigger a full initialization if the settings are changed from their
-  // existing values. Otherwise they are no-ops.
+  // creation. It is also not necessary to call if the audio parameters (sample
+  // rate and number of channels) have changed. Passing updated parameters
+  // directly to |ProcessStream()| and |AnalyzeReverseStream()| is permissible.
   virtual int Initialize() = 0;
+  virtual int Initialize(int sample_rate_hz,
+                         int reverse_sample_rate_hz,
+                         int num_input_channels,
+                         int num_output_channels,
+                         int num_reverse_channels) = 0;
 
   // Pass down additional options which don't have explicit setters. This
   // ensures the options are applied immediately.
   virtual void SetExtraOptions(const Config& config) = 0;
 
+  virtual int EnableExperimentalNs(bool enable) = 0;
+  virtual bool experimental_ns_enabled() const = 0;
+
+  // DEPRECATED: It is now possible to modify the sample rate directly in a call
+  // to |ProcessStream|.
   // Sets the sample |rate| in Hz for both the primary and reverse audio
   // streams. 8000, 16000 or 32000 Hz are permitted.
   virtual int set_sample_rate_hz(int rate) = 0;
   virtual int sample_rate_hz() const = 0;
+  virtual int split_sample_rate_hz() const = 0;
 
+  // DEPRECATED: It is now possible to modify the number of channels directly in
+  // a call to |ProcessStream|.
   // Sets the number of channels for the primary audio stream. Input frames must
   // contain a number of channels given by |input_channels|, while output frames
   // will be returned with number of channels given by |output_channels|.
@@ -167,10 +196,19 @@ class AudioProcessing : public Module {
   virtual int num_input_channels() const = 0;
   virtual int num_output_channels() const = 0;
 
+  // DEPRECATED: It is now possible to modify the number of channels directly in
+  // a call to |AnalyzeReverseStream|.
   // Sets the number of channels for the reverse audio stream. Input frames must
   // contain a number of channels given by |channels|.
   virtual int set_num_reverse_channels(int channels) = 0;
   virtual int num_reverse_channels() const = 0;
+
+  // Set to true when the output of AudioProcessing will be muted or in some
+  // other way not used. Ideally, the captured audio would still be processed,
+  // but some components may change behavior based on this information.
+  // Default false.
+  virtual void set_output_will_be_muted(bool muted) = 0;
+  virtual bool output_will_be_muted() const = 0;
 
   // Processes a 10 ms |frame| of the primary audio stream. On the client-side,
   // this is the near-end (or captured) audio.
@@ -180,9 +218,20 @@ class AudioProcessing : public Module {
   // with the stream_ tag which is needed should be called after processing.
   //
   // The |sample_rate_hz_|, |num_channels_|, and |samples_per_channel_|
-  // members of |frame| must be valid, and correspond to settings supplied
-  // to APM.
+  // members of |frame| must be valid. If changed from the previous call to this
+  // method, it will trigger an initialization.
   virtual int ProcessStream(AudioFrame* frame) = 0;
+
+  // Accepts deinterleaved float audio with the range [-1, 1]. Each element
+  // of |data| points to a channel buffer, arranged according to
+  // |input_layout|. At output, the channels will be arranged according to
+  // |output_layout|.
+  // TODO(ajm): Output layout conversion does not yet work.
+  virtual int ProcessStream(float* const* data,
+                            int samples_per_channel,
+                            int sample_rate_hz,
+                            ChannelLayout input_layout,
+                            ChannelLayout output_layout) = 0;
 
   // Analyzes a 10 ms |frame| of the reverse direction audio stream. The frame
   // will not be modified. On the client-side, this is the far-end (or to be
@@ -195,10 +244,18 @@ class AudioProcessing : public Module {
   // chances are you don't need to use it.
   //
   // The |sample_rate_hz_|, |num_channels_|, and |samples_per_channel_|
-  // members of |frame| must be valid.
+  // members of |frame| must be valid. |sample_rate_hz_| must correspond to
+  // |sample_rate_hz()|
   //
   // TODO(ajm): add const to input; requires an implementation fix.
   virtual int AnalyzeReverseStream(AudioFrame* frame) = 0;
+
+  // Accepts deinterleaved float audio with the range [-1, 1]. Each element
+  // of |data| points to a channel buffer, arranged according to |layout|.
+  virtual int AnalyzeReverseStream(const float* const* data,
+                                   int samples_per_channel,
+                                   int sample_rate_hz,
+                                   ChannelLayout layout) = 0;
 
   // This must be called if and only if echo processing is enabled.
   //
@@ -215,6 +272,12 @@ class AudioProcessing : public Module {
   //     ProcessStream().
   virtual int set_stream_delay_ms(int delay) = 0;
   virtual int stream_delay_ms() const = 0;
+  virtual bool was_stream_delay_set() const = 0;
+
+  // Call to signal that a key press occurred (true) or did not occur (false)
+  // with this chunk of audio.
+  virtual void set_stream_key_pressed(bool key_pressed) = 0;
+  virtual bool stream_key_pressed() const = 0;
 
   // Sets a delay |offset| in ms to add to the values passed in through
   // set_stream_delay_ms(). May be positive or negative.
@@ -230,6 +293,10 @@ class AudioProcessing : public Module {
   // An already existing file will be overwritten without warning.
   static const size_t kMaxFilenameSize = 1024;
   virtual int StartDebugRecording(const char filename[kMaxFilenameSize]) = 0;
+
+  // Same as above but uses an existing file handle. Takes ownership
+  // of |handle| and closes it at StopDebugRecording().
+  virtual int StartDebugRecording(FILE* handle) = 0;
 
   // Stops recording debugging information, and closes the file. Recording
   // cannot be resumed in the same file (without overwriting it).
@@ -275,9 +342,11 @@ class AudioProcessing : public Module {
     kBadStreamParameterWarning = -13
   };
 
-  // Inherited from Module.
-  virtual int32_t TimeUntilNextProcess() OVERRIDE;
-  virtual int32_t Process() OVERRIDE;
+  enum {
+    kSampleRate8kHz = 8000,
+    kSampleRate16kHz = 16000,
+    kSampleRate32kHz = 32000
+  };
 };
 
 // The acoustic echo cancellation (AEC) component provides better performance

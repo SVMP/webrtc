@@ -160,7 +160,7 @@ bool VCMCodecDataBase::SetSendCodec(
   if (max_payload_size <= 0) {
     max_payload_size = kDefaultPayloadSize;
   }
-  if (number_of_cores <= 0 || number_of_cores > 32) {
+  if (number_of_cores <= 0) {
     return false;
   }
   if (send_codec->plType <= 0) {
@@ -338,12 +338,6 @@ bool VCMCodecDataBase::RequiresEncoderReset(const VideoCodec& new_send_codec) {
       }
       break;
     case kVideoCodecGeneric:
-      if (memcmp(&new_send_codec.codecSpecific.Generic,
-                 &send_codec_.codecSpecific.Generic,
-                 sizeof(new_send_codec.codecSpecific.Generic)) !=
-          0) {
-        return true;
-      }
       break;
     // Known codecs without payload-specifics
     case kVideoCodecI420:

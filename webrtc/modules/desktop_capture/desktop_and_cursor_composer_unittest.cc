@@ -14,6 +14,7 @@
 #include "webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/mouse_cursor.h"
+#include "webrtc/modules/desktop_capture/shared_desktop_frame.h"
 #include "webrtc/modules/desktop_capture/window_capturer.h"
 #include "webrtc/system_wrappers/interface/logging.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
@@ -57,6 +58,18 @@ uint32_t BlendPixels(uint32_t dest, uint32_t src) {
   return b + (g << 8) + (r << 16) + 0xff000000;
 }
 
+DesktopFrame* CreateTestFrame() {
+  DesktopFrame* frame =
+      new BasicDesktopFrame(DesktopSize(kScreenWidth, kScreenHeight));
+  uint32_t* data = reinterpret_cast<uint32_t*>(frame->data());
+  for (int y = 0; y < kScreenHeight; ++y) {
+    for (int x = 0; x < kScreenWidth; ++x) {
+      *(data++) = GetFakeFramePixelValue(DesktopVector(x, y));
+    }
+  }
+  return frame;
+}
+
 class FakeScreenCapturer : public DesktopCapturer {
  public:
   FakeScreenCapturer() {}
@@ -66,19 +79,17 @@ class FakeScreenCapturer : public DesktopCapturer {
   }
 
   virtual void Capture(const DesktopRegion& region) OVERRIDE {
-    DesktopFrame* frame =
-        new BasicDesktopFrame(DesktopSize(kScreenWidth, kScreenHeight));
-    uint32_t* data = reinterpret_cast<uint32_t*>(frame->data());
-    for (int y = 0; y < kScreenHeight; ++y) {
-      for (int x = 0; x < kScreenWidth; ++x) {
-        *(data++) = GetFakeFramePixelValue(DesktopVector(x, y));
-      }
-    }
-    callback_->OnCaptureCompleted(frame);
+    callback_->OnCaptureCompleted(next_frame_.release());
+  }
+
+  void SetNextFrame(DesktopFrame* next_frame) {
+    next_frame_.reset(next_frame);
   }
 
  private:
   Callback* callback_;
+
+  scoped_ptr<DesktopFrame> next_frame_;
 };
 
 class FakeMouseMonitor : public MouseCursorMonitor {
@@ -155,8 +166,9 @@ class DesktopAndCursorComposerTest : public testing::Test,
                                      public DesktopCapturer::Callback {
  public:
   DesktopAndCursorComposerTest()
-      : fake_cursor_(new FakeMouseMonitor()),
-        blender_(new FakeScreenCapturer(), fake_cursor_) {
+      : fake_screen_(new FakeScreenCapturer()),
+        fake_cursor_(new FakeMouseMonitor()),
+        blender_(fake_screen_, fake_cursor_) {
   }
 
   // DesktopCapturer::Callback interface
@@ -170,10 +182,26 @@ class DesktopAndCursorComposerTest : public testing::Test,
 
  protected:
   // Owned by |blender_|.
+  FakeScreenCapturer* fake_screen_;
   FakeMouseMonitor* fake_cursor_;
+
   DesktopAndCursorComposer blender_;
   scoped_ptr<DesktopFrame> frame_;
 };
+
+// Verify DesktopAndCursorComposer can handle the case when the screen capturer
+// fails.
+TEST_F(DesktopAndCursorComposerTest, Error) {
+  blender_.Start(this);
+
+  fake_cursor_->SetHotspot(DesktopVector());
+  fake_cursor_->SetState(MouseCursorMonitor::INSIDE, DesktopVector());
+  fake_screen_->SetNextFrame(NULL);
+
+  blender_.Capture(DesktopRegion());
+
+  EXPECT_EQ(frame_, static_cast<DesktopFrame*>(NULL));
+}
 
 TEST_F(DesktopAndCursorComposerTest, Blend) {
   struct {
@@ -210,9 +238,18 @@ TEST_F(DesktopAndCursorComposerTest, Blend) {
     DesktopVector pos(tests[i].x, tests[i].y);
     fake_cursor_->SetState(state, pos);
 
+    scoped_ptr<SharedDesktopFrame> frame(
+        SharedDesktopFrame::Wrap(CreateTestFrame()));
+    fake_screen_->SetNextFrame(frame->Share());
+
     blender_.Capture(DesktopRegion());
 
     VerifyFrame(*frame_, state, pos);
+
+    // Verify that the cursor is erased before the frame buffer is returned to
+    // the screen capturer.
+    frame_.reset();
+    VerifyFrame(*frame, MouseCursorMonitor::OUTSIDE, DesktopVector());
   }
 }
 

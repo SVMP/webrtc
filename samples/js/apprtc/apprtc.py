@@ -60,10 +60,10 @@ def make_pc_config(stun_server, turn_server, ts_pwd):
   servers = []
   if turn_server:
     turn_config = 'turn:{}'.format(turn_server)
-    servers.append({'url':turn_config, 'credential':ts_pwd})
+    servers.append({'urls':turn_config, 'credential':ts_pwd})
   if stun_server:
     stun_config = 'stun:{}'.format(stun_server)
-  servers.append({'url':stun_config})
+  servers.append({'urls':stun_config})
   return {'iceServers':servers}
 
 def create_channel(room, user, duration_minutes):
@@ -91,6 +91,9 @@ def handle_message(room, user, message):
       if other_user == user:
         message = make_loopback_answer(message)
     on_message(room, other_user, message)
+  else:
+    # For unittest
+    on_message(room, user, message)
 
 def get_saved_messages(client_id):
   return Message.gql("WHERE client_id = :id", id=client_id)
@@ -144,15 +147,20 @@ def make_media_stream_constraints(audio, video):
   logging.info('Applying media constraints: ' + str(stream_constraints))
   return stream_constraints
 
-def make_pc_constraints(compat):
+def maybe_add_constraint(constraints, param, constraint):
+  if (param.lower() == 'true'):
+    constraints['optional'].append({constraint: True})
+  elif (param.lower() == 'false'):
+    constraints['optional'].append({constraint: False})
+
+  return constraints
+
+def make_pc_constraints(dtls, dscp, ipv6):
   constraints = { 'optional': [] }
-  # For interop with FireFox. Enable DTLS in peerConnection ctor.
-  if compat.lower() == 'true':
-    constraints['optional'].append({'DtlsSrtpKeyAgreement': True})
-  # Disable DTLS in peerConnection ctor for loopback call. The value
-  # of compat is false for loopback mode.
-  else:
-    constraints['optional'].append({'DtlsSrtpKeyAgreement': False})
+  maybe_add_constraint(constraints, dtls, 'DtlsSrtpKeyAgreement')
+  maybe_add_constraint(constraints, dscp, 'googDscp')
+  maybe_add_constraint(constraints, ipv6, 'googIPv6')
+
   return constraints
 
 def make_offer_constraints():
@@ -250,22 +258,27 @@ class Room(db.Model):
     if user == self.user2:
       return self.user2_connected
 
+@db.transactional
+def connect_user_to_room(room_key, user):
+  room = Room.get_by_key_name(room_key)
+  # Check if room has user in case that disconnect message comes before
+  # connect message with unknown reason, observed with local AppEngine SDK.
+  if room and room.has_user(user):
+    room.set_connected(user)
+    logging.info('User ' + user + ' connected to room ' + room_key)
+    logging.info('Room ' + room_key + ' has state ' + str(room))
+  else:
+    logging.warning('Unexpected Connect Message to room ' + room_key)
+  return room
+
 class ConnectPage(webapp2.RequestHandler):
   def post(self):
     key = self.request.get('from')
     room_key, user = key.split('/')
     with LOCK:
-      room = Room.get_by_key_name(room_key)
-      # Check if room has user in case that disconnect message comes before
-      # connect message with unknown reason, observed with local AppEngine SDK.
+      room = connect_user_to_room(room_key, user)
       if room and room.has_user(user):
-        room.set_connected(user)
         send_saved_messages(make_client_id(room, user))
-        logging.info('User ' + user + ' connected to room ' + room_key)
-        logging.info('Room ' + room_key + ' has state ' + str(room))
-      else:
-        logging.warning('Unexpected Connect Message to room ' + room_key)
-
 
 class DisconnectPage(webapp2.RequestHandler):
   def post(self):
@@ -314,11 +327,10 @@ class MainPage(webapp2.RequestHandler):
     if not stun_server:
       stun_server = get_default_stun_server(user_agent)
     turn_server = self.request.get('ts')
-
     ts_pwd = self.request.get('tp')
 
     # Use "audio" and "video" to set the media stream constraints. Defined here:
-    # http://dev.w3.org/2011/webrtc/editor/getusermedia.html#idl-def-MediaStreamConstraints
+    # http://goo.gl/V7cZg
     #
     # "true" and "false" are recognized and interpreted as bools, for example:
     #   "?audio=true&video=false" (Start an audio-only call.)
@@ -336,11 +348,8 @@ class MainPage(webapp2.RequestHandler):
     # Keys starting with "goog" will be added to the "optional" key; all others
     # will be added to the "mandatory" key.
     #
-    # The audio keys are defined here:
-    # https://code.google.com/p/webrtc/source/browse/trunk/talk/app/webrtc/localaudiosource.cc
-    #
-    # The video keys are defined here:
-    # https://code.google.com/p/webrtc/source/browse/trunk/talk/app/webrtc/videosource.cc
+    # The audio keys are defined here: talk/app/webrtc/localaudiosource.cc
+    # The video keys are defined here: talk/app/webrtc/videosource.cc
     audio = self.request.get('audio')
     video = self.request.get('video')
 
@@ -370,20 +379,20 @@ class MainPage(webapp2.RequestHandler):
     if self.request.get('stereo'):
       stereo = self.request.get('stereo')
 
-    # Set compat to true by default.
-    compat = 'true'
-    if self.request.get('compat'):
-      compat = self.request.get('compat')
+    # Options for making pcConstraints
+    dtls = self.request.get('dtls')
+    dscp = self.request.get('dscp')
+    ipv6 = self.request.get('ipv6')
 
     debug = self.request.get('debug')
     if debug == 'loopback':
-      # Set compat to false as DTLS does not work for loopback.
-      compat = 'false'
+      # Set dtls to false as DTLS does not work for loopback.
+      dtls = 'false'
 
-    # token_timeout for channel creation, default 30min, max 2 days, min 3min.
+    # token_timeout for channel creation, default 30min, max 1 days, min 3min.
     token_timeout = self.request.get_range('tt',
                                            min_value = 3,
-                                           max_value = 3000,
+                                           max_value = 1440,
                                            default = 30)
 
     unittest = self.request.get('unittest')
@@ -425,13 +434,18 @@ class MainPage(webapp2.RequestHandler):
         logging.info('Room ' + room_key + ' is full')
         return
 
+    if turn_server == 'false':
+      turn_server = None
+      turn_url = ''
+    else:
+      turn_url = 'https://computeengineondemand.appspot.com/'
+      turn_url = turn_url + 'turn?' + 'username=' + user + '&key=4080218913'
+
     room_link = base_url + '?r=' + room_key
     room_link = append_url_arguments(self.request, room_link)
-    turn_url = 'https://computeengineondemand.appspot.com/'
-    turn_url = turn_url + 'turn?' + 'username=' + user + '&key=4080218913'
     token = create_channel(room, user, token_timeout)
     pc_config = make_pc_config(stun_server, turn_server, ts_pwd)
-    pc_constraints = make_pc_constraints(compat)
+    pc_constraints = make_pc_constraints(dtls, dscp, ipv6)
     offer_constraints = make_offer_constraints()
     media_constraints = make_media_stream_constraints(audio, video)
     template_values = {'error_messages': error_messages,

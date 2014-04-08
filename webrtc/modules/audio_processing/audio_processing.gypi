@@ -7,6 +7,13 @@
 # be found in the AUTHORS file in the root of the source tree.
 
 {
+  'variables': {
+    'audio_processing_dependencies': [
+      '<(webrtc_root)/common_audio/common_audio.gyp:common_audio',
+      '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
+    ],
+    'shared_generated_dir': '<(SHARED_INTERMEDIATE_DIR)/audio_processing/asm_offsets',
+  },
   'targets': [
     {
       'target_name': 'audio_processing',
@@ -21,24 +28,8 @@
         'aec_untrusted_delay_for_testing%': 0,
       },
       'dependencies': [
-        '<(webrtc_root)/common_audio/common_audio.gyp:common_audio',
-        '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
+        '<@(audio_processing_dependencies)',
       ],
-      'include_dirs': [
-        '../interface',
-        'aec/include',
-        'aecm/include',
-        'agc/include',
-        'include',
-        'ns/include',
-        'utility',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '../interface',
-          'include',
-        ],
-      },
       'sources': [
         'aec/include/echo_cancellation.h',
         'aec/echo_cancellation.c',
@@ -65,7 +56,6 @@
         'audio_processing_impl.h',
         'echo_cancellation_impl.cc',
         'echo_cancellation_impl.h',
-        'echo_cancellation_impl_wrapper.h',
         'echo_control_mobile_impl.cc',
         'echo_control_mobile_impl.h',
         'gain_control_impl.cc',
@@ -77,10 +67,10 @@
         'level_estimator_impl.h',
         'noise_suppression_impl.cc',
         'noise_suppression_impl.h',
-        'splitting_filter.cc',
-        'splitting_filter.h',
         'processing_component.cc',
         'processing_component.h',
+        'typing_detection.cc',
+        'typing_detection.h',
         'utility/delay_estimator.c',
         'utility/delay_estimator.h',
         'utility/delay_estimator_internal.h',
@@ -113,6 +103,17 @@
             'ns/nsx_core.h',
             'ns/nsx_defines.h',
           ],
+          'conditions': [
+            ['target_arch=="mipsel"', {
+              'sources': [
+                'ns/nsx_core_mips.c',
+              ],
+            }, {
+              'sources': [
+                'ns/nsx_core_c.c',
+              ],
+            }],
+          ],
         }, {
           'defines': ['WEBRTC_NS_FLOAT'],
           'sources': [
@@ -127,8 +128,25 @@
         ['target_arch=="ia32" or target_arch=="x64"', {
           'dependencies': ['audio_processing_sse2',],
         }],
-        ['(target_arch=="arm" and armv7==1) or target_arch=="armv7"', {
+        ['(target_arch=="arm" and arm_version==7) or target_arch=="armv7"', {
           'dependencies': ['audio_processing_neon',],
+        }],
+        ['target_arch=="mipsel"', {
+          'sources': [
+            'aecm/aecm_core_mips.c',
+          ],
+          'conditions': [
+            ['mips_fpu==1', {
+              'sources': [
+                'aec/aec_core_mips.c',
+                'aec/aec_rdft_mips.c',
+              ],
+            }],
+          ],
+        }, {
+          'sources': [
+            'aecm/aecm_core_c.c',
+          ],
         }],
       ],
       # TODO(jschuh): Bug 1348: fix size_t to int truncations.
@@ -169,7 +187,7 @@
         },
       ],
     }],
-    ['(target_arch=="arm" and armv7==1) or target_arch=="armv7"', {
+    ['(target_arch=="arm" and arm_version==7) or target_arch=="armv7"', {
       'targets': [{
         'target_name': 'audio_processing_neon',
         'type': 'static_library',
@@ -184,11 +202,14 @@
         'conditions': [
           ['OS=="android" or OS=="ios"', {
             'dependencies': [
-              'audio_processing_offsets',
+              '<(gen_core_neon_offsets_gyp):*',
             ],
             'sources': [
               'aecm/aecm_core_neon.S',
               'ns/nsx_core_neon.S',
+            ],
+            'include_dirs': [
+              '<(shared_generated_dir)',
             ],
             'sources!': [
               'aecm/aecm_core_neon.c',
@@ -198,22 +219,6 @@
           }],
         ],
       }],
-      'conditions': [
-        ['OS=="android" or OS=="ios"', {
-          'targets': [{
-            'target_name': 'audio_processing_offsets',
-            'type': 'none',
-            'sources': [
-              'aecm/aecm_core_neon_offsets.c',
-              'ns/nsx_core_neon_offsets.c',
-            ],
-            'variables': {
-              'asm_header_dir': 'asm_offsets',
-            },
-            'includes': ['../../build/generate_asm_header.gypi',],
-          }],
-        }],
-      ],
     }],
   ],
 }

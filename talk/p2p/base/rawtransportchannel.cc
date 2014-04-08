@@ -75,7 +75,7 @@ RawTransportChannel::~RawTransportChannel() {
 }
 
 int RawTransportChannel::SendPacket(const char *data, size_t size,
-                                    talk_base::DiffServCodePoint dscp,
+                                    const talk_base::PacketOptions& options,
                                     int flags) {
   if (port_ == NULL)
     return -1;
@@ -83,7 +83,7 @@ int RawTransportChannel::SendPacket(const char *data, size_t size,
     return -1;
   if (flags != 0)
     return -1;
-  return port_->SendTo(data, size, remote_address_, dscp, true);
+  return port_->SendTo(data, size, remote_address_, options, true);
 }
 
 int RawTransportChannel::SetOption(talk_base::Socket::Option opt, int value) {
@@ -257,7 +257,7 @@ void RawTransportChannel::OnReadPacket(
     PortInterface* port, const char* data, size_t size,
     const talk_base::SocketAddress& addr) {
   ASSERT(port_ == port);
-  SignalReadPacket(this, data, size, 0);
+  SignalReadPacket(this, data, size, talk_base::CreatePacketTime(0), 0);
 }
 
 void RawTransportChannel::OnMessage(talk_base::Message* msg) {

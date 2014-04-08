@@ -75,7 +75,8 @@ class PeerConnection : public PeerConnectionInterface,
       const std::string& label,
       const DataChannelInit* config);
   virtual bool GetStats(StatsObserver* observer,
-                        webrtc::MediaStreamTrackInterface* track);
+                        webrtc::MediaStreamTrackInterface* track,
+                        StatsOutputLevel level);
 
   virtual SignalingState signaling_state();
 
@@ -133,7 +134,8 @@ class PeerConnection : public PeerConnectionInterface,
                                     uint32 ssrc) OVERRIDE;
   virtual void OnRemoveLocalAudioTrack(
       MediaStreamInterface* stream,
-      AudioTrackInterface* audio_track) OVERRIDE;
+      AudioTrackInterface* audio_track,
+      uint32 ssrc) OVERRIDE;
   virtual void OnRemoveLocalVideoTrack(
       MediaStreamInterface* stream,
       VideoTrackInterface* video_track) OVERRIDE;

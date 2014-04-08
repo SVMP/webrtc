@@ -64,7 +64,7 @@ class TransportChannelProxy : public TransportChannel,
   // Implementation of the TransportChannel interface.  These simply forward to
   // the implementation.
   virtual int SendPacket(const char* data, size_t len,
-                         talk_base::DiffServCodePoint dscp,
+                         const talk_base::PacketOptions& options,
                          int flags);
   virtual int SetOption(talk_base::Socket::Option opt, int value);
   virtual int GetError();
@@ -90,7 +90,7 @@ class TransportChannelProxy : public TransportChannel,
   void OnReadableState(TransportChannel* channel);
   void OnWritableState(TransportChannel* channel);
   void OnReadPacket(TransportChannel* channel, const char* data, size_t size,
-                    int flags);
+                    const talk_base::PacketTime& packet_time, int flags);
   void OnReadyToSend(TransportChannel* channel);
   void OnRouteChange(TransportChannel* channel, const Candidate& candidate);
 

@@ -796,11 +796,38 @@ int ViERTP_RTCPImpl::SetReceiveAbsoluteSendTimeStatus(int video_channel,
                ViEId(shared_data_->instance_id(), video_channel),
                "ViERTP_RTCPImpl::SetReceiveAbsoluteSendTimeStatus(%d, %d, %d)",
                video_channel, enable, id);
-  if (!shared_data_->channel_manager()->SetReceiveAbsoluteSendTimeStatus(
-      video_channel, enable, id)) {
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  if (vie_channel->SetReceiveAbsoluteSendTimeStatus(enable, id) != 0) {
     shared_data_->SetLastError(kViERtpRtcpUnknownError);
     return -1;
   }
+  return 0;
+}
+
+int ViERTP_RTCPImpl::SetRtcpXrRrtrStatus(int video_channel, bool enable) {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "ViERTP_RTCPImpl::SetRtcpXrRrtrStatus(%d, %d)",
+               video_channel, enable);
+
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  vie_channel->SetRtcpXrRrtrStatus(enable);
   return 0;
 }
 
@@ -823,12 +850,33 @@ int ViERTP_RTCPImpl::SetTransmissionSmoothingStatus(int video_channel,
   return 0;
 }
 
-int ViERTP_RTCPImpl::GetReceivedRTCPStatistics(const int video_channel,
-                                               uint16_t& fraction_lost,
-                                               unsigned int& cumulative_lost,
-                                               unsigned int& extended_max,
-                                               unsigned int& jitter,
-                                               int& rtt_ms) const {
+int ViERTP_RTCPImpl::SetMinTransmitBitrate(int video_channel,
+                                           int min_transmit_bitrate_kbps) {
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEEncoder* vie_encoder = cs.Encoder(video_channel);
+  if (vie_encoder == NULL)
+    return -1;
+  vie_encoder->SetMinTransmitBitrate(min_transmit_bitrate_kbps);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::SetReservedTransmitBitrate(
+    int video_channel, unsigned int reserved_transmit_bitrate_bps) {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "ViERTP_RTCPImpl::SetReservedTransmitBitrate(%d, %d)",
+               video_channel, reserved_transmit_bitrate_bps);
+  if (!shared_data_->channel_manager()->SetReservedTransmitBitrate(
+      video_channel, reserved_transmit_bitrate_bps)) {
+    return -1;
+  }
+  return 0;
+}
+
+int ViERTP_RTCPImpl::GetReceiveChannelRtcpStatistics(
+    const int video_channel,
+    RtcpStatistics& basic_stats,
+    int& rtt_ms) const {
   WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
                ViEId(shared_data_->instance_id(), video_channel),
                "%s(channel: %d)", __FUNCTION__, video_channel);
@@ -841,26 +889,82 @@ int ViERTP_RTCPImpl::GetReceivedRTCPStatistics(const int video_channel,
     shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
     return -1;
   }
-  if (vie_channel->GetReceivedRtcpStatistics(&fraction_lost,
-                                             &cumulative_lost,
-                                             &extended_max,
-                                             &jitter,
-                                             &rtt_ms) != 0) {
+
+  // TODO(sprang): Clean this up when stats struct is propagated all the way.
+  uint16_t frac_lost;
+  if (vie_channel->GetReceivedRtcpStatistics(
+          &frac_lost,
+          &basic_stats.cumulative_lost,
+          &basic_stats.extended_max_sequence_number,
+          &basic_stats.jitter,
+          &rtt_ms) != 0) {
+    shared_data_->SetLastError(kViERtpRtcpUnknownError);
+    return -1;
+  }
+  basic_stats.fraction_lost = frac_lost;
+  return 0;
+}
+
+int ViERTP_RTCPImpl::GetSendChannelRtcpStatistics(const int video_channel,
+                                                  RtcpStatistics& basic_stats,
+                                                  int& rtt_ms) const {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+
+  // TODO(sprang): Clean this up when stats struct is propagated all the way.
+  uint16_t frac_lost;
+  if (vie_channel->GetSendRtcpStatistics(
+          &frac_lost,
+          &basic_stats.cumulative_lost,
+          &basic_stats.extended_max_sequence_number,
+          &basic_stats.jitter,
+          &rtt_ms) != 0) {
+    shared_data_->SetLastError(kViERtpRtcpUnknownError);
+    return -1;
+  }
+  basic_stats.fraction_lost = frac_lost;
+  return 0;
+}
+
+int ViERTP_RTCPImpl::GetRtpStatistics(const int video_channel,
+                                      StreamDataCounters& sent,
+                                      StreamDataCounters& received) const {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  if (vie_channel->GetRtpStatistics(&sent.bytes,
+                                    &sent.packets,
+                                    &received.bytes,
+                                    &received.packets) != 0) {
     shared_data_->SetLastError(kViERtpRtcpUnknownError);
     return -1;
   }
   return 0;
 }
 
-int ViERTP_RTCPImpl::GetSentRTCPStatistics(const int video_channel,
-                                           uint16_t& fraction_lost,
-                                           unsigned int& cumulative_lost,
-                                           unsigned int& extended_max,
-                                           unsigned int& jitter,
-                                           int& rtt_ms) const {
-  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
-               ViEId(shared_data_->instance_id(), video_channel),
-               "%s(channel: %d)", __FUNCTION__, video_channel);
+int ViERTP_RTCPImpl::GetRtcpPacketTypeCounters(
+    int video_channel,
+    RtcpPacketTypeCounter* packets_sent,
+    RtcpPacketTypeCounter* packets_received) const {
   ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
   ViEChannel* vie_channel = cs.Channel(video_channel);
   if (!vie_channel) {
@@ -870,40 +974,7 @@ int ViERTP_RTCPImpl::GetSentRTCPStatistics(const int video_channel,
     shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
     return -1;
   }
-
-  if (vie_channel->GetSendRtcpStatistics(&fraction_lost, &cumulative_lost,
-                                         &extended_max, &jitter,
-                                         &rtt_ms) != 0) {
-    shared_data_->SetLastError(kViERtpRtcpUnknownError);
-    return -1;
-  }
-  return 0;
-}
-
-int ViERTP_RTCPImpl::GetRTPStatistics(const int video_channel,
-                                      unsigned int& bytes_sent,
-                                      unsigned int& packets_sent,
-                                      unsigned int& bytes_received,
-                                      unsigned int& packets_received) const {
-  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
-               ViEId(shared_data_->instance_id(), video_channel),
-               "%s(channel: %d)", __FUNCTION__, video_channel);
-  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
-  ViEChannel* vie_channel = cs.Channel(video_channel);
-  if (!vie_channel) {
-    WEBRTC_TRACE(kTraceError, kTraceVideo,
-                 ViEId(shared_data_->instance_id(), video_channel),
-                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
-    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
-    return -1;
-  }
-  if (vie_channel->GetRtpStatistics(&bytes_sent,
-                                    &packets_sent,
-                                    &bytes_received,
-                                    &packets_received) != 0) {
-    shared_data_->SetLastError(kViERtpRtcpUnknownError);
-    return -1;
-  }
+  vie_channel->GetRtcpPacketTypeCounters(packets_sent, packets_received);
   return 0;
 }
 
@@ -969,6 +1040,45 @@ int ViERTP_RTCPImpl::GetEstimatedReceiveBandwidth(
   }
   vie_channel->GetEstimatedReceiveBandwidth(
       static_cast<uint32_t*>(estimated_bandwidth));
+  return 0;
+}
+
+int ViERTP_RTCPImpl::GetReceiveBandwidthEstimatorStats(
+    const int video_channel,
+    ReceiveBandwidthEstimatorStats* output) const {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Could not get channel %d", __FUNCTION__,
+                 video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  vie_channel->GetReceiveBandwidthEstimatorStats(output);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::GetPacerQueuingDelayMs(
+    const int video_channel, int* delay_ms) const {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEEncoder* vie_encoder = cs.Encoder(video_channel);
+  if (!vie_encoder) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Could not get encoder for channel %d", __FUNCTION__,
+                 video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  *delay_ms = vie_encoder->PacerQueuingDelayMs();
   return 0;
 }
 
@@ -1100,4 +1210,196 @@ int ViERTP_RTCPImpl::DeregisterRTCPObserver(const int video_channel) {
   return 0;
 }
 
+int ViERTP_RTCPImpl::RegisterSendChannelRtcpStatisticsCallback(
+  int video_channel, RtcpStatisticsCallback* callback) {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  vie_channel->RegisterSendChannelRtcpStatisticsCallback(callback);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::DeregisterSendChannelRtcpStatisticsCallback(
+    int video_channel, RtcpStatisticsCallback* callback) {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  vie_channel->RegisterSendChannelRtcpStatisticsCallback(NULL);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::RegisterReceiveChannelRtcpStatisticsCallback(
+    const int video_channel,
+    RtcpStatisticsCallback* callback) {
+  WEBRTC_TRACE(kTraceApiCall,
+               kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)",
+               __FUNCTION__,
+               video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  assert(vie_channel != NULL);
+  vie_channel->RegisterReceiveChannelRtcpStatisticsCallback(callback);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::DeregisterReceiveChannelRtcpStatisticsCallback(
+    const int video_channel,
+    RtcpStatisticsCallback* callback) {
+  WEBRTC_TRACE(kTraceApiCall,
+               kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)",
+               __FUNCTION__,
+               video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  assert(vie_channel != NULL);
+  vie_channel->RegisterReceiveChannelRtcpStatisticsCallback(NULL);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::RegisterSendChannelRtpStatisticsCallback(
+    int video_channel, StreamDataCountersCallback* callback) {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  assert(vie_channel != NULL);
+  vie_channel->RegisterSendChannelRtpStatisticsCallback(callback);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::DeregisterSendChannelRtpStatisticsCallback(
+    int video_channel, StreamDataCountersCallback* callback) {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  assert(vie_channel != NULL);
+  vie_channel->RegisterSendChannelRtpStatisticsCallback(NULL);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::RegisterReceiveChannelRtpStatisticsCallback(
+    const int video_channel,
+    StreamDataCountersCallback* callback) {
+  WEBRTC_TRACE(kTraceApiCall,
+               kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)",
+               __FUNCTION__,
+               video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  assert(vie_channel != NULL);
+  vie_channel->RegisterReceiveChannelRtpStatisticsCallback(callback);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::DeregisterReceiveChannelRtpStatisticsCallback(
+    const int video_channel,
+    StreamDataCountersCallback* callback) {
+  WEBRTC_TRACE(kTraceApiCall,
+               kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)",
+               __FUNCTION__,
+               video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  assert(vie_channel != NULL);
+  vie_channel->RegisterReceiveChannelRtpStatisticsCallback(NULL);
+  return 0;
+}
+
+// Called whenever the send bitrate is updated.
+int ViERTP_RTCPImpl::RegisterSendBitrateObserver(
+    const int video_channel,
+    BitrateStatisticsObserver* observer) {
+  WEBRTC_TRACE(kTraceApiCall,
+               kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)",
+               __FUNCTION__,
+               video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  assert(vie_channel != NULL);
+  vie_channel->RegisterSendBitrateObserver(observer);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::DeregisterSendBitrateObserver(
+    const int video_channel,
+    BitrateStatisticsObserver* observer) {
+  WEBRTC_TRACE(kTraceApiCall,
+               kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)",
+               __FUNCTION__,
+               video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  assert(vie_channel != NULL);
+  vie_channel->RegisterSendBitrateObserver(NULL);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::RegisterSendFrameCountObserver(
+    int video_channel, FrameCountObserver* callback) {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  vie_channel->RegisterSendFrameCountObserver(callback);
+  return 0;
+}
+
+int ViERTP_RTCPImpl::DeregisterSendFrameCountObserver(
+    int video_channel, FrameCountObserver* callback) {
+  WEBRTC_TRACE(kTraceApiCall, kTraceVideo,
+               ViEId(shared_data_->instance_id(), video_channel),
+               "%s(channel: %d)", __FUNCTION__, video_channel);
+  ViEChannelManagerScoped cs(*(shared_data_->channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(video_channel);
+  if (!vie_channel) {
+    WEBRTC_TRACE(kTraceError, kTraceVideo,
+                 ViEId(shared_data_->instance_id(), video_channel),
+                 "%s: Channel %d doesn't exist", __FUNCTION__, video_channel);
+    shared_data_->SetLastError(kViERtpRtcpInvalidChannelId);
+    return -1;
+  }
+  vie_channel->RegisterSendFrameCountObserver(NULL);
+  return 0;
+}
 }  // namespace webrtc

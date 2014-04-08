@@ -58,7 +58,10 @@ NetEqImpl::NetEqImpl(int fs,
                      DtmfToneGenerator* dtmf_tone_generator,
                      PacketBuffer* packet_buffer,
                      PayloadSplitter* payload_splitter,
-                     TimestampScaler* timestamp_scaler)
+                     TimestampScaler* timestamp_scaler,
+                     AccelerateFactory* accelerate_factory,
+                     ExpandFactory* expand_factory,
+                     PreemptiveExpandFactory* preemptive_expand_factory)
     : buffer_level_filter_(buffer_level_filter),
       decoder_database_(decoder_database),
       delay_manager_(delay_manager),
@@ -69,6 +72,9 @@ NetEqImpl::NetEqImpl(int fs,
       payload_splitter_(payload_splitter),
       timestamp_scaler_(timestamp_scaler),
       vad_(new PostDecodeVad()),
+      expand_factory_(expand_factory),
+      accelerate_factory_(accelerate_factory),
+      preemptive_expand_factory_(preemptive_expand_factory),
       last_mode_(kModeNormal),
       mute_factor_array_(NULL),
       decoded_buffer_length_(kMaxFrameSize),
@@ -143,12 +149,12 @@ int NetEqImpl::InsertSyncPacket(const WebRtcRTPHeader& rtp_header,
   int error = InsertPacketInternal(
       rtp_header, kSyncPayload, sizeof(kSyncPayload), receive_timestamp, true);
 
-   if (error != 0) {
-     LOG_FERR1(LS_WARNING, InsertPacketInternal, error);
-     error_code_ = error;
-     return kFail;
-   }
-   return kOK;
+  if (error != 0) {
+    LOG_FERR1(LS_WARNING, InsertPacketInternal, error);
+    error_code_ = error;
+    return kFail;
+  }
+  return kOK;
 }
 
 int NetEqImpl::GetAudio(size_t max_length, int16_t* output_audio,
@@ -552,10 +558,23 @@ int NetEqImpl::InsertPacketInternal(const WebRtcRTPHeader& rtp_header,
     }
   }
 
+  // Check for FEC in packets, and separate payloads into several packets.
+  int ret = payload_splitter_->SplitFec(&packet_list, decoder_database_.get());
+  if (ret != PayloadSplitter::kOK) {
+    LOG_FERR1(LS_WARNING, SplitFec, packet_list.size());
+    PacketBuffer::DeleteAllPackets(&packet_list);
+    switch (ret) {
+      case PayloadSplitter::kUnknownPayloadType:
+        return kUnknownRtpPayloadType;
+      default:
+        return kOtherError;
+    }
+  }
+
   // Split payloads into smaller chunks. This also verifies that all payloads
   // are of a known payload type. SplitAudio() method is protected against
   // sync-packets.
-  int ret = payload_splitter_->SplitAudio(&packet_list, *decoder_database_);
+  ret = payload_splitter_->SplitAudio(&packet_list, *decoder_database_);
   if (ret != PayloadSplitter::kOK) {
     LOG_FERR1(LS_WARNING, SplitAudio, packet_list.size());
     PacketBuffer::DeleteAllPackets(&packet_list);
@@ -827,10 +846,10 @@ int NetEqImpl::GetAudioInternal(size_t max_length, int16_t* output,
     sync_buffer_->set_dtmf_index(sync_buffer_->Size());
   }
 
-  if ((last_mode_ != kModeExpand) && (last_mode_ != kModeRfc3389Cng)) {
-    // If last operation was neither expand, nor comfort noise, calculate the
-    // |playout_timestamp_| from the |sync_buffer_|. However, do not update the
-    // |playout_timestamp_| if it would be moved "backwards".
+  if (last_mode_ != kModeExpand) {
+    // If last operation was not expand, calculate the |playout_timestamp_| from
+    // the |sync_buffer_|. However, do not update the |playout_timestamp_| if it
+    // would be moved "backwards".
     uint32_t temp_timestamp = sync_buffer_->end_timestamp() -
         static_cast<uint32_t>(sync_buffer_->FutureLength());
     if (static_cast<int32_t>(temp_timestamp - playout_timestamp_) > 0) {
@@ -864,15 +883,15 @@ int NetEqImpl::GetDecision(Operations* operation,
   }
   const RTPHeader* header = packet_buffer_->NextRtpHeader();
 
-  if (decision_logic_->CngRfc3389On()) {
+  if (decision_logic_->CngRfc3389On() || last_mode_ == kModeRfc3389Cng) {
     // Because of timestamp peculiarities, we have to "manually" disallow using
     // a CNG packet with the same timestamp as the one that was last played.
     // This can happen when using redundancy and will cause the timing to shift.
-    while (header &&
-        decoder_database_->IsComfortNoise(header->payloadType) &&
-        end_timestamp >= header->timestamp) {
+    while (header && decoder_database_->IsComfortNoise(header->payloadType) &&
+           (end_timestamp >= header->timestamp ||
+            end_timestamp + decision_logic_->generated_noise_samples() >
+                header->timestamp)) {
       // Don't use this packet, discard it.
-      // TODO(hlundin): Write test for this case.
       if (packet_buffer_->DiscardNextPacket() != PacketBuffer::kOK) {
         assert(false);  // Must be ok by design.
       }
@@ -1126,12 +1145,11 @@ int NetEqImpl::Decode(PacketList* packet_list, Operations* operation,
           PacketBuffer::DeleteAllPackets(packet_list);
           return kDecoderNotFound;
         }
-        // We should have correct sampling rate and number of channels. They
-        // are set when packets are inserted.
+        // If sampling rate or number of channels has changed, we need to make
+        // a reset.
         if (decoder_info->fs_hz != fs_hz_ ||
             decoder->channels() != algorithm_buffer_->Channels()) {
-          LOG_F(LS_ERROR) << "Sampling rate or number of channels mismatch.";
-          assert(false);
+          // TODO(tlegrand): Add unittest to cover this event.
           SetSampleRateAndChannels(decoder_info->fs_hz, decoder->channels());
         }
         sync_buffer_->set_end_timestamp(timestamp_);
@@ -1771,8 +1789,14 @@ int NetEqImpl::ExtractPackets(int required_samples, PacketList* packet_list) {
     AudioDecoder* decoder = decoder_database_->GetDecoder(
         packet->header.payloadType);
     if (decoder) {
-      packet_duration = packet->sync_packet ? decoder_frame_length_ :
-          decoder->PacketDuration(packet->payload, packet->payload_length);
+      if (packet->sync_packet) {
+        packet_duration = decoder_frame_length_;
+      } else {
+        packet_duration = packet->primary ?
+            decoder->PacketDuration(packet->payload, packet->payload_length) :
+            decoder->PacketDurationRedundant(packet->payload,
+                                             packet->payload_length);
+      }
     } else {
       LOG_FERR1(LS_WARNING, GetDecoder, packet->header.payloadType) <<
           "Could not find a decoder for a packet about to be extracted.";
@@ -1853,8 +1877,9 @@ void NetEqImpl::SetSampleRateAndChannels(int fs_hz, size_t channels) {
   random_vector_.Reset();
 
   // Delete Expand object and create a new one.
-  expand_.reset(new Expand(background_noise_.get(), sync_buffer_.get(),
-                           &random_vector_, fs_hz, channels));
+  expand_.reset(expand_factory_->Create(background_noise_.get(),
+                                        sync_buffer_.get(), &random_vector_,
+                                        fs_hz, channels));
   // Move index so that we create a small set of future samples (all 0).
   sync_buffer_->set_next_index(sync_buffer_->next_index() -
                                expand_->overlap_length());
@@ -1862,9 +1887,10 @@ void NetEqImpl::SetSampleRateAndChannels(int fs_hz, size_t channels) {
   normal_.reset(new Normal(fs_hz, decoder_database_.get(), *background_noise_,
                            expand_.get()));
   merge_.reset(new Merge(fs_hz, channels, expand_.get(), sync_buffer_.get()));
-  accelerate_.reset(new Accelerate(fs_hz, channels, *background_noise_));
-  preemptive_expand_.reset(new PreemptiveExpand(fs_hz, channels,
-                                                *background_noise_));
+  accelerate_.reset(
+      accelerate_factory_->Create(fs_hz, channels, *background_noise_));
+  preemptive_expand_.reset(
+      preemptive_expand_factory_->Create(fs_hz, channels, *background_noise_));
 
   // Delete ComfortNoise object and create a new one.
   comfort_noise_.reset(new ComfortNoise(fs_hz, decoder_database_.get(),
@@ -1887,13 +1913,13 @@ NetEqOutputType NetEqImpl::LastOutputType() {
   assert(expand_.get());
   if (last_mode_ == kModeCodecInternalCng || last_mode_ == kModeRfc3389Cng) {
     return kOutputCNG;
-  } else if (vad_->running() && !vad_->active_speech()) {
-    return kOutputVADPassive;
   } else if (last_mode_ == kModeExpand && expand_->MuteFactor(0) == 0) {
     // Expand mode has faded down to background noise only (very long expand).
     return kOutputPLCtoCNG;
   } else if (last_mode_ == kModeExpand) {
     return kOutputPLC;
+  } else if (vad_->running() && !vad_->active_speech()) {
+    return kOutputVADPassive;
   } else {
     return kOutputNormal;
   }

@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "talk/base/asyncpacketsocket.h"
 #include "talk/base/basictypes.h"
 #include "talk/base/dscp.h"
 #include "talk/base/sigslot.h"
@@ -82,7 +83,7 @@ class TransportChannel : public sigslot::has_slots<> {
   // Attempts to send the given packet.  The return value is < 0 on failure.
   // TODO: Remove the default argument once channel code is updated.
   virtual int SendPacket(const char* data, size_t len,
-                         talk_base::DiffServCodePoint dscp,
+                         const talk_base::PacketOptions& options,
                          int flags = 0) = 0;
 
   // Sets a socket option on this channel.  Note that not all options are
@@ -122,8 +123,8 @@ class TransportChannel : public sigslot::has_slots<> {
       size_t result_len) = 0;
 
   // Signalled each time a packet is received on this channel.
-  sigslot::signal4<TransportChannel*, const char*,
-                   size_t, int> SignalReadPacket;
+  sigslot::signal5<TransportChannel*, const char*,
+                   size_t, const talk_base::PacketTime&, int> SignalReadPacket;
 
   // This signal occurs when there is a change in the way that packets are
   // being routed, i.e. to a different remote location. The candidate

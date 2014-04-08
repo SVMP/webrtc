@@ -41,12 +41,12 @@
 
 #ifdef HAVE_SRTP
 #define ASSERT_CRYPTO(cd, s, cs) \
-    ASSERT_FALSE(cd->crypto_required()); \
+    ASSERT_EQ(cricket::CT_NONE, cd->crypto_required()); \
     ASSERT_EQ(s, cd->cryptos().size()); \
     ASSERT_EQ(std::string(cs), cd->cryptos()[0].cipher_suite)
 #else
 #define ASSERT_CRYPTO(cd, s, cs) \
-  ASSERT_FALSE(cd->crypto_required()); \
+  ASSERT_EQ(cricket::CT_NONE, cd->crypto_required()); \
   ASSERT_EQ(0U, cd->cryptos().size());
 #endif
 
@@ -143,6 +143,7 @@ static const RtpHeaderExtension kAudioRtpExtension1[] = {
 static const RtpHeaderExtension kAudioRtpExtension2[] = {
   RtpHeaderExtension("urn:ietf:params:rtp-hdrext:ssrc-audio-level", 2),
   RtpHeaderExtension("http://google.com/testing/audio_something_else", 8),
+  RtpHeaderExtension("http://google.com/testing/both_audio_and_video", 7),
 };
 
 static const RtpHeaderExtension kAudioRtpExtensionAnswer[] = {
@@ -151,18 +152,21 @@ static const RtpHeaderExtension kAudioRtpExtensionAnswer[] = {
 
 static const RtpHeaderExtension kVideoRtpExtension1[] = {
   RtpHeaderExtension("urn:ietf:params:rtp-hdrext:toffset", 14),
-  RtpHeaderExtension("http://google.com/testing/video_something", 15),
+  RtpHeaderExtension("http://google.com/testing/video_something", 13),
 };
 
 static const RtpHeaderExtension kVideoRtpExtension2[] = {
   RtpHeaderExtension("urn:ietf:params:rtp-hdrext:toffset", 2),
   RtpHeaderExtension("http://google.com/testing/video_something_else", 14),
+  RtpHeaderExtension("http://google.com/testing/both_audio_and_video", 7),
 };
 
 static const RtpHeaderExtension kVideoRtpExtensionAnswer[] = {
   RtpHeaderExtension("urn:ietf:params:rtp-hdrext:toffset", 14),
 };
 
+static const uint32 kSimulcastParamsSsrc[] = {10, 11, 20, 21, 30, 31};
+static const uint32 kSimSsrc[] = {10, 20, 30};
 static const uint32 kFec1Ssrc[] = {10, 11};
 static const uint32 kFec2Ssrc[] = {20, 21};
 static const uint32 kFec3Ssrc[] = {30, 31};
@@ -192,6 +196,32 @@ class MediaSessionDescriptionFactoryTest : public testing::Test {
     tdf2_.set_identity(&id2_);
   }
 
+  // Create a video StreamParamsVec object with:
+  // - one video stream with 3 simulcast streams and FEC,
+  StreamParamsVec CreateComplexVideoStreamParamsVec() {
+    SsrcGroup sim_group("SIM", MAKE_VECTOR(kSimSsrc));
+    SsrcGroup fec_group1("FEC", MAKE_VECTOR(kFec1Ssrc));
+    SsrcGroup fec_group2("FEC", MAKE_VECTOR(kFec2Ssrc));
+    SsrcGroup fec_group3("FEC", MAKE_VECTOR(kFec3Ssrc));
+
+    std::vector<SsrcGroup> ssrc_groups;
+    ssrc_groups.push_back(sim_group);
+    ssrc_groups.push_back(fec_group1);
+    ssrc_groups.push_back(fec_group2);
+    ssrc_groups.push_back(fec_group3);
+
+    StreamParams simulcast_params;
+    simulcast_params.id = kVideoTrack1;
+    simulcast_params.ssrcs = MAKE_VECTOR(kSimulcastParamsSsrc);
+    simulcast_params.ssrc_groups = ssrc_groups;
+    simulcast_params.cname = "Video_SIM_FEC";
+    simulcast_params.sync_label = kMediaStream1;
+
+    StreamParamsVec video_streams;
+    video_streams.push_back(simulcast_params);
+
+    return video_streams;
+  }
 
   bool CompareCryptoParams(const CryptoParamsVec& c1,
                            const CryptoParamsVec& c2) {
@@ -1492,7 +1522,7 @@ TEST_F(MediaSessionDescriptionFactoryTest,
       GetFirstVideoContentDescription(updated_answer.get());
 
   ASSERT_EQ("H264", updated_vcd->codecs()[0].name);
-  ASSERT_EQ(cricket::kRtxCodecName, updated_vcd->codecs()[1].name);
+  ASSERT_EQ(std::string(cricket::kRtxCodecName), updated_vcd->codecs()[1].name);
   int new_h264_pl_type =  updated_vcd->codecs()[0].id;
   EXPECT_NE(used_pl_type, new_h264_pl_type);
   VideoCodec rtx = updated_vcd->codecs()[1];
@@ -1588,17 +1618,19 @@ TEST_F(MediaSessionDescriptionFactoryTest,
   // extensions from the first offer/answer exchange plus the extensions only
   // |f2_| offer.
   // Since the default local extension id |f2_| uses has already been used by
-  // |f1_| for another extensions, it is changed to 255.
+  // |f1_| for another extensions, it is changed to 13.
   const RtpHeaderExtension kUpdatedAudioRtpExtensions[] = {
     kAudioRtpExtensionAnswer[0],
-    RtpHeaderExtension(kAudioRtpExtension2[1].uri, 255),
+    RtpHeaderExtension(kAudioRtpExtension2[1].uri, 13),
+    kAudioRtpExtension2[2],
   };
 
   // Since the default local extension id |f2_| uses has already been used by
-  // |f1_| for another extensions, is is changed to 254.
+  // |f1_| for another extensions, is is changed to 12.
   const RtpHeaderExtension kUpdatedVideoRtpExtensions[] = {
     kVideoRtpExtensionAnswer[0],
-    RtpHeaderExtension(kVideoRtpExtension2[1].uri, 254),
+    RtpHeaderExtension(kVideoRtpExtension2[1].uri, 12),
+    kVideoRtpExtension2[2],
   };
 
   const AudioContentDescription* updated_acd =

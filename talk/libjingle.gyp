@@ -27,7 +27,6 @@
 
 {
   'includes': ['build/common.gypi'],
-
   'conditions': [
     ['os_posix == 1 and OS != "mac" and OS != "ios"', {
      'conditions': [
@@ -53,6 +52,9 @@
           ],
           'sources': [
             'app/webrtc/java/jni/peerconnection_jni.cc'
+          ],
+          'include_dirs': [
+            '<(DEPTH)/third_party/libyuv/include',
           ],
           'conditions': [
             ['OS=="linux"', {
@@ -96,6 +98,7 @@
               'variables': {
                 'java_src_dir': 'app/webrtc/java/src',
                 'webrtc_modules_dir': '<(webrtc_root)/modules',
+                'build_jar_log': '<(INTERMEDIATE_DIR)/build_jar.log',
                 'peerconnection_java_files': [
                   'app/webrtc/java/src/org/webrtc/AudioSource.java',
                   'app/webrtc/java/src/org/webrtc/AudioTrack.java',
@@ -121,13 +124,15 @@
                 # included here, or better yet, build a proper .jar in webrtc
                 # and include it here.
                 'android_java_files': [
-                  '<(webrtc_modules_dir)/audio_device/android/java/src/org/webrtc/voiceengine/WebRTCAudioDevice.java',
+                  'app/webrtc/java/src/org/webrtc/MediaCodecVideoEncoder.java',
                   '<(webrtc_modules_dir)/audio_device/android/java/src/org/webrtc/voiceengine/AudioManagerAndroid.java',
                   '<(webrtc_modules_dir)/video_capture/android/java/src/org/webrtc/videoengine/VideoCaptureAndroid.java',
                   '<(webrtc_modules_dir)/video_capture/android/java/src/org/webrtc/videoengine/VideoCaptureDeviceInfoAndroid.java',
                   '<(webrtc_modules_dir)/video_render/android/java/src/org/webrtc/videoengine/ViEAndroidGLES20.java',
                   '<(webrtc_modules_dir)/video_render/android/java/src/org/webrtc/videoengine/ViERenderer.java',
                   '<(webrtc_modules_dir)/video_render/android/java/src/org/webrtc/videoengine/ViESurfaceRenderer.java',
+                  '<(webrtc_modules_dir)/audio_device/android/java/src/org/webrtc/voiceengine/WebRtcAudioRecord.java',
+                  '<(webrtc_modules_dir)/audio_device/android/java/src/org/webrtc/voiceengine/WebRtcAudioTrack.java',
                 ],
               },
               'action_name': 'create_jar',
@@ -152,10 +157,13 @@
                 }],
               ],
               'action': [
-                'build/build_jar.sh', '<(java_home)', '<@(_outputs)',
-                '<(INTERMEDIATE_DIR)',
-                '<(build_classpath)',
-                '<@(java_files)'
+                'bash', '-ec',
+                'mkdir -p <(INTERMEDIATE_DIR) && '
+                '{ build/build_jar.sh <(java_home) <@(_outputs) '
+                '      <(INTERMEDIATE_DIR)/build_jar.tmp '
+                '      <(build_classpath) <@(java_files) '
+                '      > <(build_jar_log) 2>&1 || '
+                '  { cat <(build_jar_log) ; exit 1; } }'
               ],
             },
           ],
@@ -272,7 +280,10 @@
         'base/asyncfile.h',
         'base/asynchttprequest.cc',
         'base/asynchttprequest.h',
+        'base/asyncinvoker.cc',
+        'base/asyncinvoker.h',
         'base/asyncpacketsocket.h',
+        'base/asyncresolverinterface.h',
         'base/asyncsocket.cc',
         'base/asyncsocket.h',
         'base/asynctcpsocket.cc',
@@ -293,6 +304,7 @@
         'base/bytebuffer.cc',
         'base/bytebuffer.h',
         'base/byteorder.h',
+        'base/callback.h',
         'base/checks.cc',
         'base/checks.h',
         'base/common.cc',
@@ -394,6 +406,7 @@
         'base/scoped_autorelease_pool.h',
         'base/scoped_ptr.h',
         'base/scoped_ref_ptr.h',
+        'base/scopedptrcollection.h',
         'base/sec_buffer.h',
         'base/sha1.cc',
         'base/sha1.h',
@@ -420,6 +433,7 @@
         'base/ssladapter.cc',
         'base/ssladapter.h',
         'base/sslconfig.h',
+        'base/sslfingerprint.cc',
         'base/sslfingerprint.h',
         'base/sslidentity.cc',
         'base/sslidentity.h',
@@ -518,6 +532,8 @@
         'xmpp/pubsub_task.h',
         'xmpp/pubsubclient.cc',
         'xmpp/pubsubclient.h',
+        'xmpp/pubsubstateclient.cc',
+        'xmpp/pubsubstateclient.h',
         'xmpp/pubsubtasks.cc',
         'xmpp/pubsubtasks.h',
         'xmpp/receivetask.cc',
@@ -553,13 +569,6 @@
         'xmpp/xmppthread.h',
       ],
       'conditions': [
-        ['OS=="mac" or OS=="ios" or OS=="win"', {
-          'dependencies': [
-            # The chromium copy of nss should NOT be used on platforms that
-            # have NSS as system libraries, such as linux.
-            '<(DEPTH)/third_party/nss/nss.gyp:nss',
-          ],
-        }],
         ['OS=="android"', {
           'sources': [
             'base/ifaddrs-android.cc',
@@ -720,13 +729,9 @@
             'base/unixfilesystem.h',
           ],
           'conditions': [
-            ['OS=="linux" or OS=="android"', {
-              'dependencies': [
-                '<(DEPTH)/third_party/openssl/openssl.gyp:openssl',
-              ],
-            }],
             ['OS!="ios"', {
               'sources': [
+                'base/openssl.h',
                 'base/openssladapter.cc',
                 'base/openssladapter.h',
                 'base/openssldigest.cc',
@@ -786,8 +791,14 @@
     {
       'target_name': 'libjingle_media',
       'type': 'static_library',
+      'include_dirs': [
+        # TODO(jiayl): move this into the direct_dependent_settings of
+        # usrsctp.gyp.
+        '<(DEPTH)/third_party/usrsctp',
+      ],
       'dependencies': [
         '<(DEPTH)/third_party/libyuv/libyuv.gyp:libyuv',
+        '<(DEPTH)/third_party/usrsctp/usrsctp.gyp:usrsctplib',
         '<(webrtc_root)/modules/modules.gyp:video_capture_module',
         '<(webrtc_root)/modules/modules.gyp:video_render_module',
         '<(webrtc_root)/video_engine/video_engine.gyp:video_engine_core',
@@ -846,6 +857,8 @@
         'media/base/videoprocessor.h',
         'media/base/videorenderer.h',
         'media/base/voiceprocessor.h',
+        'media/base/yuvframegenerator.cc',
+        'media/base/yuvframegenerator.h',
         'media/devices/deviceinfo.h',
         'media/devices/devicemanager.cc',
         'media/devices/devicemanager.h',
@@ -853,12 +866,11 @@
         'media/devices/filevideocapturer.cc',
         'media/devices/filevideocapturer.h',
         'media/devices/videorendererfactory.h',
+        'media/devices/yuvframescapturer.cc',
+        'media/devices/yuvframescapturer.h',
         'media/other/linphonemediaengine.h',
-        # TODO(ronghuawu): Enable when SCTP is ready.
-        # 'media/sctp/sctpdataengine.cc',
-        # 'media/sctp/sctpdataengine.h',
-        'media/sctp/sctputils.cc',
-        'media/sctp/sctputils.h',
+        'media/sctp/sctpdataengine.cc',
+        'media/sctp/sctpdataengine.h',
         'media/webrtc/webrtccommon.h',
         'media/webrtc/webrtcexport.h',
         'media/webrtc/webrtcmediaengine.h',
@@ -974,6 +986,13 @@
             # libjpeg which pulls in libyuv which currently disabled.
             '../third_party/libyuv/include',
           ],
+          'dependencies!': [
+            '<(DEPTH)/third_party/usrsctp/usrsctp.gyp:usrsctplib',
+          ],
+          'sources!': [
+            'media/sctp/sctpdataengine.cc',
+            'media/sctp/sctpdataengine.h',
+          ],
         }],
         ['OS=="android"', {
           'sources': [
@@ -1004,10 +1023,6 @@
           '<(DEPTH)/testing/gtest/include',
         ],
       },
-      'defines': [
-        # TODO(ronghuawu): enable SCTP when it's ready.
-        # 'HAVE_SCTP',
-      ],
       'sources': [
         'p2p/base/asyncstuntcpsocket.cc',
         'p2p/base/asyncstuntcpsocket.h',
@@ -1183,8 +1198,12 @@
         'app/webrtc/portallocatorfactory.cc',
         'app/webrtc/portallocatorfactory.h',
         'app/webrtc/proxy.h',
+        'app/webrtc/remoteaudiosource.cc',
+        'app/webrtc/remoteaudiosource.h',
         'app/webrtc/remotevideocapturer.cc',
         'app/webrtc/remotevideocapturer.h',
+        'app/webrtc/sctputils.cc',
+        'app/webrtc/sctputils.h',
         'app/webrtc/statscollector.cc',
         'app/webrtc/statscollector.h',
         'app/webrtc/statstypes.h',

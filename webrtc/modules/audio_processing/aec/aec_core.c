@@ -419,6 +419,7 @@ WebRtcAec_FilterFar_t WebRtcAec_FilterFar;
 WebRtcAec_ScaleErrorSignal_t WebRtcAec_ScaleErrorSignal;
 WebRtcAec_FilterAdaptation_t WebRtcAec_FilterAdaptation;
 WebRtcAec_OverdriveAndSuppress_t WebRtcAec_OverdriveAndSuppress;
+WebRtcAec_ComfortNoise_t WebRtcAec_ComfortNoise;
 
 int WebRtcAec_InitAec(AecCore* aec, int sampFreq) {
   int i;
@@ -474,6 +475,17 @@ int WebRtcAec_InitAec(AecCore* aec, int sampFreq) {
 
   aec->extended_filter_enabled = 0;
   aec->num_partitions = kNormalNumPartitions;
+
+  // Update the delay estimator with filter length.  We use half the
+  // |num_partitions| to take the echo path into account.  In practice we say
+  // that the echo has a duration of maximum half |num_partitions|, which is not
+  // true, but serves as a crude measure.
+  WebRtc_set_allowed_offset(aec->delay_estimator, aec->num_partitions / 2);
+  // TODO(bjornv): I currently hard coded the enable.  Once we've established
+  // that AECM has no performance regression, robust_validation will be enabled
+  // all the time and the APIs to turn it on/off will be removed.  Hence, remove
+  // this line then.
+  WebRtc_enable_robust_validation(aec->delay_estimator, 1);
 
   // Default target suppression mode.
   aec->nlp_mode = 1;
@@ -557,11 +569,16 @@ int WebRtcAec_InitAec(AecCore* aec, int sampFreq) {
   WebRtcAec_ScaleErrorSignal = ScaleErrorSignal;
   WebRtcAec_FilterAdaptation = FilterAdaptation;
   WebRtcAec_OverdriveAndSuppress = OverdriveAndSuppress;
+  WebRtcAec_ComfortNoise = ComfortNoise;
 
 #if defined(WEBRTC_ARCH_X86_FAMILY)
   if (WebRtc_GetCPUInfo(kSSE2)) {
     WebRtcAec_InitAec_SSE2();
   }
+#endif
+
+#if defined(MIPS_FPU_LE)
+  WebRtcAec_InitAec_mips();
 #endif
 
   aec_rdft_init();
@@ -724,7 +741,7 @@ int WebRtcAec_GetDelayMetricsCore(AecCore* self, int* median, int* std) {
 
   // Calculate the L1 norm, with median value as central moment.
   for (i = 0; i < kHistorySizeBlocks; i++) {
-    l1_norm += (float)(fabs(i - my_median) * self->delay_histogram[i]);
+    l1_norm += (float)abs(i - my_median) * self->delay_histogram[i];
   }
   *std = (int)(l1_norm / (float)num_delay_values + 0.5f) * kMsPerBlock;
 
@@ -771,6 +788,8 @@ void WebRtcAec_SetConfigCore(AecCore* self,
 void WebRtcAec_enable_delay_correction(AecCore* self, int enable) {
   self->extended_filter_enabled = enable;
   self->num_partitions = enable ? kExtendedNumPartitions : kNormalNumPartitions;
+  // Update the delay estimator with filter length.  See InitAEC() for details.
+  WebRtc_set_allowed_offset(self->delay_estimator, self->num_partitions / 2);
 }
 
 int WebRtcAec_delay_correction_enabled(AecCore* self) {
@@ -1156,9 +1175,11 @@ static void NonLinearProcessing(AecCore* aec, short* output, short* outputH) {
     memcpy(efw, dfw, sizeof(efw));
   }
 
-  // Reset if error is significantly larger than nearend (13 dB).
-  if (seSum > (19.95f * sdSum)) {
-    memset(aec->wfBuf, 0, sizeof(aec->wfBuf));
+  if (!aec->extended_filter_enabled) {
+    // Reset if error is significantly larger than nearend (13 dB).
+    if (seSum > (19.95f * sdSum)) {
+      memset(aec->wfBuf, 0, sizeof(aec->wfBuf));
+    }
   }
 
   // Subband coherence
@@ -1264,7 +1285,7 @@ static void NonLinearProcessing(AecCore* aec, short* output, short* outputH) {
   WebRtcAec_OverdriveAndSuppress(aec, hNl, hNlFb, efw);
 
   // Add comfort noise.
-  ComfortNoise(aec, efw, comfortNoiseHband, aec->noisePow, hNl);
+  WebRtcAec_ComfortNoise(aec, efw, comfortNoiseHband, aec->noisePow, hNl);
 
   // TODO(bjornv): Investigate how to take the windowing below into account if
   // needed.

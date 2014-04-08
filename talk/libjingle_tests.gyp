@@ -39,7 +39,11 @@
         '<(DEPTH)/testing/gtest/include',
         '<(DEPTH)/testing/gtest',
       ],
+      'defines': ['_VARIADIC_MAX=10'],
       'direct_dependent_settings': {
+        'defines': [
+          '_VARIADIC_MAX=10',
+        ],
         'include_dirs': [
           '<(DEPTH)/testing/gtest/include',
         ],
@@ -88,6 +92,7 @@
         'media/base/testutils.cc',
         'media/base/testutils.h',
         'media/devices/fakedevicemanager.h',
+        'media/webrtc/dummyinstantiation.cc',
         'media/webrtc/fakewebrtccommon.h',
         'media/webrtc/fakewebrtcdeviceinfo.h',
         'media/webrtc/fakewebrtcvcmfactory.h',
@@ -115,8 +120,10 @@
         'base/buffer_unittest.cc',
         'base/bytebuffer_unittest.cc',
         'base/byteorder_unittest.cc',
+        'base/callback_unittest.cc',
         'base/cpumonitor_unittest.cc',
         'base/crc32_unittest.cc',
+        'base/criticalsection_unittest.cc',
         'base/event_unittest.cc',
         'base/filelock_unittest.cc',
         'base/fileutils_unittest.cc',
@@ -143,6 +150,7 @@
         'base/ratetracker_unittest.cc',
         'base/referencecountedsingletonfactory_unittest.cc',
         'base/rollingaccumulator_unittest.cc',
+        'base/scopedptrcollection_unittest.cc',
         'base/sha1digest_unittest.cc',
         'base/sharedexclusivelock_unittest.cc',
         'base/signalthread_unittest.cc',
@@ -278,6 +286,9 @@
         'media/base/videoengine_unittest.h',
         'media/devices/dummydevicemanager_unittest.cc',
         'media/devices/filevideocapturer_unittest.cc',
+        # TODO(jiayl): Enable the SCTP test once the memcheck and tsan bots
+        # failures are fixed (issue 2846).
+        #'media/sctp/sctpdataengine_unittest.cc',
         'media/webrtc/webrtcpassthroughrender_unittest.cc',
         'media/webrtc/webrtcvideocapturer_unittest.cc',
         # Omitted because depends on non-open-source testdata files.
@@ -287,8 +298,8 @@
         # Disabled because some tests fail.
         # TODO(ronghuawu): Reenable these tests.
         # 'media/devices/devicemanager_unittest.cc',
-        # 'media/webrtc/webrtcvideoengine_unittest.cc',
-        # 'media/webrtc/webrtcvoiceengine_unittest.cc',
+        'media/webrtc/webrtcvideoengine_unittest.cc',
+        'media/webrtc/webrtcvoiceengine_unittest.cc',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -302,6 +313,11 @@
               ],
             },
           },
+        }],
+        ['OS=="ios"', {
+          'sources!': [
+            'media/sctp/sctpdataengine_unittest.cc',
+          ],
         }],
       ],
     },  # target libjingle_media_unittest
@@ -375,7 +391,7 @@
       ],
       # TODO(ronghuawu): Reenable below unit tests that require gmock.
       'sources': [
-        'app/webrtc/datachannel_unittest.cc',
+        # 'app/webrtc/datachannel_unittest.cc',
         'app/webrtc/dtmfsender_unittest.cc',
         'app/webrtc/jsepsessiondescription_unittest.cc',
         'app/webrtc/localaudiosource_unittest.cc',
@@ -383,10 +399,12 @@
         # 'app/webrtc/mediastreamhandler_unittest.cc',
         'app/webrtc/mediastreamsignaling_unittest.cc',
         'app/webrtc/peerconnection_unittest.cc',
+        'app/webrtc/peerconnectionendtoend_unittest.cc',
         'app/webrtc/peerconnectionfactory_unittest.cc',
         'app/webrtc/peerconnectioninterface_unittest.cc',
         # 'app/webrtc/peerconnectionproxy_unittest.cc',
         'app/webrtc/remotevideocapturer_unittest.cc',
+        'app/webrtc/sctputils.cc',
         'app/webrtc/test/fakeaudiocapturemodule.cc',
         'app/webrtc/test/fakeaudiocapturemodule.h',
         'app/webrtc/test/fakeaudiocapturemodule_unittest.cc',
@@ -397,6 +415,8 @@
         'app/webrtc/test/fakeperiodicvideocapturer.h',
         'app/webrtc/test/fakevideotrackrenderer.h',
         'app/webrtc/test/mockpeerconnectionobservers.h',
+        'app/webrtc/test/peerconnectiontestwrapper.h',
+        'app/webrtc/test/peerconnectiontestwrapper.cc',
         'app/webrtc/test/testsdpstrings.h',
         'app/webrtc/videosource_unittest.cc',
         'app/webrtc/videotrack_unittest.cc',

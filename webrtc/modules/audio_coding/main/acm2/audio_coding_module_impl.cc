@@ -20,6 +20,7 @@
 #include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_generic_codec.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_resampler.h"
+#include "webrtc/modules/audio_coding/main/acm2/call_statistics.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/rw_lock_wrapper.h"
 #include "webrtc/system_wrappers/interface/trace.h"
@@ -1204,11 +1205,7 @@ int AudioCodingModuleImpl::Add10MsData(
     return -1;
   }
 
-  // Allow for 8, 16, 32 and 48kHz input audio.
-  if ((audio_frame.sample_rate_hz_ != 8000)
-      && (audio_frame.sample_rate_hz_ != 16000)
-      && (audio_frame.sample_rate_hz_ != 32000)
-      && (audio_frame.sample_rate_hz_ != 48000)) {
+  if (audio_frame.sample_rate_hz_ > 48000) {
     assert(false);
     WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceAudioCoding, id_,
                  "Cannot Add 10 ms audio, input frequency not valid");
@@ -1370,7 +1367,7 @@ int AudioCodingModuleImpl::PreprocessToAddData(const AudioFrame& in_frame,
 
     if (preprocess_frame_.samples_per_channel_ < 0) {
       WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceAudioCoding, id_,
-                   "Cannot add 10 ms audio, resmapling failed");
+                   "Cannot add 10 ms audio, resampling failed");
       return -1;
     }
     preprocess_frame_.sample_rate_hz_ = send_codec_inst_.plfreq;
@@ -1973,6 +1970,15 @@ std::vector<uint16_t> AudioCodingModuleImpl::GetNackList(
 
 int AudioCodingModuleImpl::LeastRequiredDelayMs() const {
   return receiver_.LeastRequiredDelayMs();
+}
+
+const char* AudioCodingModuleImpl::Version() const {
+  return kExperimentalAcmVersion;
+}
+
+void AudioCodingModuleImpl::GetDecodingCallStatistics(
+      AudioDecodingCallStats* call_stats) const {
+  receiver_.GetDecodingCallStatistics(call_stats);
 }
 
 }  // namespace acm2

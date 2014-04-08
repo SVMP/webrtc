@@ -43,42 +43,39 @@
 
 namespace cricket {
 
+class BaseChannel;
 class ChannelManager;
 class DataChannel;
 class StatsReport;
 class Transport;
 class VideoCapturer;
-class BaseChannel;
 class VideoChannel;
 class VoiceChannel;
 
 }  // namespace cricket
 
 namespace webrtc {
-
 class IceRestartAnswerLatch;
 class MediaStreamSignaling;
 class WebRtcSessionDescriptionFactory;
 
-extern const char kSetLocalSdpFailed[];
-extern const char kSetRemoteSdpFailed[];
-extern const char kCreateChannelFailed[];
 extern const char kBundleWithoutRtcpMux[];
+extern const char kCreateChannelFailed[];
 extern const char kInvalidCandidates[];
 extern const char kInvalidSdp[];
 extern const char kMlineMismatch[];
-extern const char kSdpWithoutCrypto[];
-extern const char kSdpWithoutSdesAndDtlsDisabled[];
+extern const char kPushDownTDFailed[];
+extern const char kSdpWithoutDtlsFingerprint[];
+extern const char kSdpWithoutSdesCrypto[];
 extern const char kSdpWithoutIceUfragPwd[];
+extern const char kSdpWithoutSdesAndDtlsDisabled[];
 extern const char kSessionError[];
-extern const char kUpdateStateFailed[];
-extern const char kPushDownOfferTDFailed[];
-extern const char kPushDownPranswerTDFailed[];
-extern const char kPushDownAnswerTDFailed[];
+extern const char kSessionErrorDesc[];
 
 // ICE state callback interface.
 class IceObserver {
  public:
+  IceObserver() {}
   // Called any time the IceConnectionState changes
   virtual void OnIceConnectionChange(
       PeerConnectionInterface::IceConnectionState new_state) {}
@@ -94,6 +91,9 @@ class IceObserver {
 
  protected:
   ~IceObserver() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(IceObserver);
 };
 
 class WebRtcSession : public cricket::BaseSession,
@@ -131,8 +131,8 @@ class WebRtcSession : public cricket::BaseSession,
     return data_channel_.get();
   }
 
-  void set_secure_policy(cricket::SecureMediaPolicy secure_policy);
-  cricket::SecureMediaPolicy secure_policy() const;
+  void SetSdesPolicy(cricket::SecurePolicy secure_policy);
+  cricket::SecurePolicy SdesPolicy() const;
 
   // Get current ssl role from transport.
   bool GetSslRole(talk_base::SSLRole* role);
@@ -168,6 +168,7 @@ class WebRtcSession : public cricket::BaseSession,
   virtual void SetAudioSend(uint32 ssrc, bool enable,
                             const cricket::AudioOptions& options,
                             cricket::AudioRenderer* renderer) OVERRIDE;
+  virtual void SetAudioPlayoutVolume(uint32 ssrc, double volume) OVERRIDE;
 
   // Implements VideoMediaProviderInterface.
   virtual bool SetCaptureDevice(uint32 ssrc,
@@ -190,15 +191,14 @@ class WebRtcSession : public cricket::BaseSession,
                         cricket::SendDataResult* result) OVERRIDE;
   virtual bool ConnectDataChannel(DataChannel* webrtc_data_channel) OVERRIDE;
   virtual void DisconnectDataChannel(DataChannel* webrtc_data_channel) OVERRIDE;
-  virtual void AddRtpDataStream(uint32 send_ssrc, uint32 recv_ssrc) OVERRIDE;
   virtual void AddSctpDataStream(uint32 sid) OVERRIDE;
-  virtual void RemoveRtpDataStream(uint32 send_ssrc, uint32 recv_ssrc) OVERRIDE;
   virtual void RemoveSctpDataStream(uint32 sid) OVERRIDE;
   virtual bool ReadyToSendData() const OVERRIDE;
 
+  // Implements DataChannelFactory.
   talk_base::scoped_refptr<DataChannel> CreateDataChannel(
       const std::string& label,
-      const DataChannelInit* config);
+      const InternalDataChannelInit* config) OVERRIDE;
 
   cricket::DataChannelType data_channel_type() const;
 
@@ -226,7 +226,6 @@ class WebRtcSession : public cricket::BaseSession,
   // candidates allocation.
   bool StartCandidatesAllocation();
   bool UpdateSessionState(Action action, cricket::ContentSource source,
-                          const cricket::SessionDescription* desc,
                           std::string* err_desc);
   static Action GetAction(const std::string& type);
 
@@ -234,6 +233,8 @@ class WebRtcSession : public cricket::BaseSession,
   virtual void OnTransportRequestSignaling(cricket::Transport* transport);
   virtual void OnTransportConnecting(cricket::Transport* transport);
   virtual void OnTransportWritable(cricket::Transport* transport);
+  virtual void OnTransportCompleted(cricket::Transport* transport);
+  virtual void OnTransportFailed(cricket::Transport* transport);
   virtual void OnTransportProxyCandidatesReady(
       cricket::TransportProxy* proxy,
       const cricket::Candidates& candidates);
@@ -276,13 +277,16 @@ class WebRtcSession : public cricket::BaseSession,
   // The |saved_candidates_| will be cleared after this function call.
   void CopySavedCandidates(SessionDescriptionInterface* dest_desc);
 
-  void OnNewDataChannelReceived(const std::string& label,
-                                const DataChannelInit& init);
+  // Listens to SCTP CONTROL messages on unused SIDs and process them as OPEN
+  // messages.
+  void OnDataChannelMessageReceived(cricket::DataChannel* channel,
+                                    const cricket::ReceiveDataParams& params,
+                                    const talk_base::Buffer& payload);
 
   bool GetLocalTrackId(uint32 ssrc, std::string* track_id);
   bool GetRemoteTrackId(uint32 ssrc, std::string* track_id);
 
-  std::string BadStateErrMsg(const std::string& type, State state);
+  std::string BadStateErrMsg(State state);
   void SetIceConnectionState(PeerConnectionInterface::IceConnectionState state);
 
   bool ValidateBundleSettings(const cricket::SessionDescription* desc);
@@ -290,7 +294,7 @@ class WebRtcSession : public cricket::BaseSession,
   // Below methods are helper methods which verifies SDP.
   bool ValidateSessionDescription(const SessionDescriptionInterface* sdesc,
                                   cricket::ContentSource source,
-                                  std::string* error_desc);
+                                  std::string* err_desc);
 
   // Check if a call to SetLocalDescription is acceptable with |action|.
   bool ExpectSetLocalDescription(Action action);
@@ -299,6 +303,8 @@ class WebRtcSession : public cricket::BaseSession,
   // Verifies a=setup attribute as per RFC 5763.
   bool ValidateDtlsSetupAttribute(const cricket::SessionDescription* desc,
                                   Action action);
+
+  std::string GetSessionErrorMsg();
 
   talk_base::scoped_ptr<cricket::VoiceChannel> voice_channel_;
   talk_base::scoped_ptr<cricket::VideoChannel> video_channel_;
@@ -314,8 +320,6 @@ class WebRtcSession : public cricket::BaseSession,
   // If the remote peer is using a older version of implementation.
   bool older_version_remote_peer_;
   bool dtls_enabled_;
-  // Flag will be set based on the constraint value.
-  bool dscp_enabled_;
   // Specifies which kind of data channel is allowed. This is controlled
   // by the chrome command-line flag and constraints:
   // 1. If chrome command-line switch 'enable-sctp-data-channels' is enabled,
@@ -332,8 +336,13 @@ class WebRtcSession : public cricket::BaseSession,
   sigslot::signal0<> SignalVoiceChannelDestroyed;
   sigslot::signal0<> SignalVideoChannelDestroyed;
   sigslot::signal0<> SignalDataChannelDestroyed;
-};
 
+  // Member variables for caching global options.
+  cricket::AudioOptions audio_options_;
+  cricket::VideoOptions video_options_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebRtcSession);
+};
 }  // namespace webrtc
 
 #endif  // TALK_APP_WEBRTC_WEBRTCSESSION_H_

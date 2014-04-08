@@ -125,10 +125,11 @@ class StunBindingRequest : public StunRequest {
 };
 
 UDPPort::UDPPort(talk_base::Thread* thread,
+                 talk_base::PacketSocketFactory* factory,
                  talk_base::Network* network,
                  talk_base::AsyncPacketSocket* socket,
                  const std::string& username, const std::string& password)
-    : Port(thread, network, socket->GetLocalAddress().ipaddr(),
+    : Port(thread, factory, network, socket->GetLocalAddress().ipaddr(),
            username, password),
       requests_(thread),
       socket_(socket),
@@ -139,10 +140,10 @@ UDPPort::UDPPort(talk_base::Thread* thread,
 }
 
 UDPPort::UDPPort(talk_base::Thread* thread,
-                   talk_base::PacketSocketFactory* factory,
-                   talk_base::Network* network,
-                   const talk_base::IPAddress& ip, int min_port, int max_port,
-                   const std::string& username, const std::string& password)
+                 talk_base::PacketSocketFactory* factory,
+                 talk_base::Network* network,
+                 const talk_base::IPAddress& ip, int min_port, int max_port,
+                 const std::string& username, const std::string& password)
     : Port(thread, LOCAL_PORT_TYPE, factory, network, ip, min_port, max_port,
            username, password),
       requests_(thread),
@@ -217,9 +218,9 @@ Connection* UDPPort::CreateConnection(const Candidate& address,
 
 int UDPPort::SendTo(const void* data, size_t size,
                     const talk_base::SocketAddress& addr,
-                    talk_base::DiffServCodePoint dscp,
+                    const talk_base::PacketOptions& options,
                     bool payload) {
-  int sent = socket_->SendTo(data, size, addr, dscp);
+  int sent = socket_->SendTo(data, size, addr, options);
   if (sent < 0) {
     error_ = socket_->GetError();
     LOG_J(LS_ERROR, this) << "UDP send of " << size
@@ -229,12 +230,6 @@ int UDPPort::SendTo(const void* data, size_t size,
 }
 
 int UDPPort::SetOption(talk_base::Socket::Option opt, int value) {
-  // TODO(mallinath) - After we have the support on socket,
-  // remove this specialization.
-  if (opt == talk_base::Socket::OPT_DSCP) {
-    SetDefaultDscpValue(static_cast<talk_base::DiffServCodePoint>(value));
-    return 0;
-  }
   return socket_->SetOption(opt, value);
 }
 
@@ -253,9 +248,10 @@ void UDPPort::OnLocalAddressReady(talk_base::AsyncPacketSocket* socket,
   MaybePrepareStunCandidate();
 }
 
-void UDPPort::OnReadPacket(talk_base::AsyncPacketSocket* socket,
-                           const char* data, size_t size,
-                           const talk_base::SocketAddress& remote_addr) {
+void UDPPort::OnReadPacket(
+  talk_base::AsyncPacketSocket* socket, const char* data, size_t size,
+  const talk_base::SocketAddress& remote_addr,
+  const talk_base::PacketTime& packet_time) {
   ASSERT(socket == socket_);
 
   // Look for a response from the STUN server.
@@ -268,7 +264,7 @@ void UDPPort::OnReadPacket(talk_base::AsyncPacketSocket* socket,
   }
 
   if (Connection* conn = GetConnection(remote_addr)) {
-    conn->OnReadPacket(data, size);
+    conn->OnReadPacket(data, size, packet_time);
   } else {
     Port::OnReadPacket(data, size, remote_addr, PROTO_UDP);
   }
@@ -302,21 +298,21 @@ void UDPPort::ResolveStunAddress() {
   if (resolver_)
     return;
 
-  resolver_ = new talk_base::AsyncResolver();
-  resolver_->SignalWorkDone.connect(this, &UDPPort::OnResolveResult);
-  resolver_->set_address(server_addr_);
-  resolver_->Start();
+  resolver_ = socket_factory()->CreateAsyncResolver();
+  resolver_->SignalDone.connect(this, &UDPPort::OnResolveResult);
+  resolver_->Start(server_addr_);
 }
 
-void UDPPort::OnResolveResult(talk_base::SignalThread* t) {
-  ASSERT(t == resolver_);
-  if (resolver_->error() != 0) {
+void UDPPort::OnResolveResult(talk_base::AsyncResolverInterface* resolver) {
+  ASSERT(resolver == resolver_);
+  if (resolver_->GetError() != 0 ||
+      !resolver_->GetResolvedAddress(ip().family(), &server_addr_))  {
     LOG_J(LS_WARNING, this) << "StunPort: stun host lookup received error "
-                            << resolver_->error();
+                            << resolver_->GetError();
     OnStunBindingOrResolveRequestFailed();
+    return;
   }
 
-  server_addr_ = resolver_->address();
   SendStunBindingRequest();
 }
 
@@ -332,7 +328,7 @@ void UDPPort::OnStunBindingRequestSucceeded(
     // related address is local socket address.
     set_related_address(socket_->GetLocalAddress());
     AddAddress(stun_addr, socket_->GetLocalAddress(), UDP_PROTOCOL_NAME,
-               STUN_PORT_TYPE, ICE_TYPE_PREFERENCE_PRFLX, false);
+               STUN_PORT_TYPE, ICE_TYPE_PREFERENCE_SRFLX, false);
   }
   SetResult(true);
 }
@@ -358,7 +354,8 @@ void UDPPort::SetResult(bool success) {
 // TODO: merge this with SendTo above.
 void UDPPort::OnSendPacket(const void* data, size_t size, StunRequest* req) {
   StunBindingRequest* sreq = static_cast<StunBindingRequest*>(req);
-  if (socket_->SendTo(data, size, sreq->server_addr(), DefaultDscpValue()) < 0)
+  talk_base::PacketOptions options(DefaultDscpValue());
+  if (socket_->SendTo(data, size, sreq->server_addr(), options) < 0)
     PLOG(LERROR, socket_->GetError()) << "sendto";
 }
 

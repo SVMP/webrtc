@@ -8,9 +8,10 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_VIDEO_ENGINE_NEW_INCLUDE_VIDEO_RECEIVE_STREAM_H_
-#define WEBRTC_VIDEO_ENGINE_NEW_INCLUDE_VIDEO_RECEIVE_STREAM_H_
+#ifndef WEBRTC_VIDEO_RECEIVE_STREAM_H_
+#define WEBRTC_VIDEO_RECEIVE_STREAM_H_
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -25,10 +26,7 @@ namespace webrtc {
 namespace newapi {
 // RTCP mode to use. Compound mode is described by RFC 4585 and reduced-size
 // RTCP mode is described by RFC 5506.
-enum RtcpMode {
-  kRtcpCompound,
-  kRtcpReducedSize
-};
+enum RtcpMode { kRtcpCompound, kRtcpReducedSize };
 }  // namespace newapi
 
 class VideoDecoder;
@@ -57,39 +55,22 @@ struct ExternalVideoDecoder {
 
 class VideoReceiveStream {
  public:
-  struct Stats {
+  struct Stats : public StreamStats {
     Stats()
         : network_frame_rate(0),
           decode_frame_rate(0),
           render_frame_rate(0),
-          key_frames(0),
-          delta_frames(0),
-          video_packets(0),
-          retransmitted_packets(0),
-          fec_packets(0),
-          padding_packets(0),
+          avg_delay_ms(0),
           discarded_packets(0),
-          received_bitrate_bps(0),
-          receive_side_delay_ms(0) {}
-    RtpStatistics rtp_stats;
+          ssrc(0) {}
+
     int network_frame_rate;
     int decode_frame_rate;
     int render_frame_rate;
-    uint32_t key_frames;
-    uint32_t delta_frames;
-    uint32_t video_packets;
-    uint32_t retransmitted_packets;
-    uint32_t fec_packets;
-    uint32_t padding_packets;
+    int avg_delay_ms;
     uint32_t discarded_packets;
-    int32_t received_bitrate_bps;
-    int receive_side_delay_ms;
-  };
-
-  class StatsCallback {
-   public:
-    virtual ~StatsCallback() {}
-    virtual void ReceiveStats(const Stats& stats) = 0;
+    uint32_t ssrc;
+    std::string c_name;
   };
 
   struct Config {
@@ -105,14 +86,31 @@ class VideoReceiveStream {
 
     // Receive-stream specific RTP settings.
     struct Rtp {
-      Rtp() : ssrc(0), rtcp_mode(newapi::kRtcpReducedSize) {}
+      Rtp()
+          : remote_ssrc(0),
+            local_ssrc(0),
+            rtcp_mode(newapi::kRtcpReducedSize),
+            remb(false) {}
 
-      // TODO(mflodman) Do we require a set ssrc? What happens if the ssrc
-      // changes?
-      uint32_t ssrc;
+      // Synchronization source (stream identifier) to be received.
+      uint32_t remote_ssrc;
+      // Sender SSRC used for sending RTCP (such as receiver reports).
+      uint32_t local_ssrc;
 
       // See RtcpMode for description.
       newapi::RtcpMode rtcp_mode;
+
+      // Extended RTCP settings.
+      struct RtcpXr {
+        RtcpXr() : receiver_reference_time_report(false) {}
+
+        // True if RTCP Receiver Reference Time Report Block extension
+        // (RFC 3611) should be enabled.
+        bool receiver_reference_time_report;
+      } rtcp_xr;
+
+      // See draft-alvestrand-rmcat-remb for information.
+      bool remb;
 
       // See NackConfig for description.
       NackConfig nack;
@@ -120,9 +118,21 @@ class VideoReceiveStream {
       // See FecConfig for description.
       FecConfig fec;
 
-      // RTX settings for possible payloads. RTX is disabled if the vector is
-      // empty.
-      std::vector<RtxConfig> rtx;
+      // RTX settings for incoming video payloads that may be received. RTX is
+      // disabled if there's no config present.
+      struct Rtx {
+        Rtx() : ssrc(0), payload_type(0) {}
+
+        // SSRCs to use for the RTX streams.
+        uint32_t ssrc;
+
+        // Payload type to use for the RTX stream.
+        int payload_type;
+      };
+
+      // Map from video RTP payload type -> RTX config.
+      typedef std::map<int, Rtx> RtxMap;
+      RtxMap rtx;
 
       // RTP header extensions used for the received stream.
       std::vector<RtpExtension> extensions;
@@ -159,13 +169,11 @@ class VideoReceiveStream {
     // Target delay in milliseconds. A positive value indicates this stream is
     // used for streaming instead of a real-time call.
     int target_delay_ms;
-
-    // Callback for periodically receiving receiver stats.
-    StatsCallback* stats_callback;
   };
 
-  virtual void StartReceive() = 0;
-  virtual void StopReceive() = 0;
+  virtual void StartReceiving() = 0;
+  virtual void StopReceiving() = 0;
+  virtual Stats GetStats() const = 0;
 
   // TODO(mflodman) Replace this with callback.
   virtual void GetCurrentReceiveCodec(VideoCodec* receive_codec) = 0;
@@ -176,4 +184,4 @@ class VideoReceiveStream {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_VIDEO_ENGINE_NEW_INCLUDE_VIDEO_RECEIVE_STREAM_H_
+#endif  // WEBRTC_VIDEO_RECEIVE_STREAM_H_

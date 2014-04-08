@@ -39,7 +39,9 @@ class RTCPeerConnectionObserver : public PeerConnectionObserver {
 
  public:
   explicit RTCPeerConnectionObserver(id<RTCPeerConnectionDelegate> delegate);
+  virtual ~RTCPeerConnectionObserver();
 
+  // |peerConnection| owns |this|, so outlives it.
   void SetPeerConnection(RTCPeerConnection *peerConnection);
 
   virtual void OnError() OVERRIDE;
@@ -57,7 +59,7 @@ class RTCPeerConnectionObserver : public PeerConnectionObserver {
   // Triggered when a remote peer open a data channel.
   virtual void OnDataChannel(DataChannelInterface* data_channel) OVERRIDE;
 
-  // Triggered when renegotation is needed, for example the ICE has restarted.
+  // Triggered when renegotiation is needed, for example the ICE has restarted.
   virtual void OnRenegotiationNeeded() OVERRIDE;
 
   // Called any time the ICEConnectionState changes
@@ -73,7 +75,9 @@ class RTCPeerConnectionObserver : public PeerConnectionObserver {
 
  private:
   id<RTCPeerConnectionDelegate> _delegate;
-  RTCPeerConnection *_peerConnection;
+  // __unsafe_unretained is in fact safe because |_peerConnection| owns |this|;
+  // see comment on SetPeerConnection() above.
+  __unsafe_unretained RTCPeerConnection *_peerConnection;
 };
 
 } // namespace webrtc

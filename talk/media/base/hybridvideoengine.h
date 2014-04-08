@@ -75,7 +75,8 @@ class HybridVideoMediaChannel : public VideoMediaChannel {
   virtual bool SetSendStreamFormat(uint32 ssrc, const VideoFormat& format);
   virtual bool SetSendRtpHeaderExtensions(
       const std::vector<RtpHeaderExtension>& extensions);
-  virtual bool SetSendBandwidth(bool autobw, int bps);
+  virtual bool SetStartSendBandwidth(int bps);
+  virtual bool SetMaxSendBandwidth(int bps);
   virtual bool SetSend(bool send);
 
   virtual bool AddRecvStream(const StreamParams& sp);
@@ -85,10 +86,12 @@ class HybridVideoMediaChannel : public VideoMediaChannel {
   virtual bool SendIntraFrame();
   virtual bool RequestIntraFrame();
 
-  virtual bool GetStats(VideoMediaInfo* info);
+  virtual bool GetStats(const StatsOptions& options, VideoMediaInfo* info);
 
-  virtual void OnPacketReceived(talk_base::Buffer* packet);
-  virtual void OnRtcpReceived(talk_base::Buffer* packet);
+  virtual void OnPacketReceived(talk_base::Buffer* packet,
+                                const talk_base::PacketTime& packet_time);
+  virtual void OnRtcpReceived(talk_base::Buffer* packet,
+                              const talk_base::PacketTime& packet_time);
   virtual void OnReadyToSend(bool ready);
 
   virtual void UpdateAspectRatio(int ratio_w, int ratio_h);

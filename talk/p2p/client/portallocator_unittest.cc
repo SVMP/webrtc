@@ -35,6 +35,7 @@
 #include "talk/base/network.h"
 #include "talk/base/physicalsocketserver.h"
 #include "talk/base/socketaddress.h"
+#include "talk/base/ssladapter.h"
 #include "talk/base/thread.h"
 #include "talk/base/virtualsocketserver.h"
 #include "talk/p2p/base/basicpacketsocketfactory.h"
@@ -52,8 +53,8 @@ using talk_base::Thread;
 static const SocketAddress kClientAddr("11.11.11.11", 0);
 static const SocketAddress kClientIPv6Addr(
     "2401:fa00:4:1000:be30:5bff:fee5:c3", 0);
+static const SocketAddress kClientAddr2("22.22.22.22", 0);
 static const SocketAddress kNatAddr("77.77.77.77", talk_base::NAT_SERVER_PORT);
-static const SocketAddress kRemoteClientAddr("22.22.22.22", 0);
 static const SocketAddress kStunAddr("99.99.99.1", cricket::STUN_SERVER_PORT);
 static const SocketAddress kRelayUdpIntAddr("99.99.99.2", 5000);
 static const SocketAddress kRelayUdpExtAddr("99.99.99.3", 5001);
@@ -88,9 +89,13 @@ std::ostream& operator<<(std::ostream& os, const cricket::Candidate& c) {
 class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
  public:
   static void SetUpTestCase() {
-    // Ensure the RNG is inited.
-    talk_base::InitRandom(NULL, 0);
+    talk_base::InitializeSSL();
   }
+
+  static void TearDownTestCase() {
+    talk_base::CleanupSSL();
+  }
+
   PortAllocatorTest()
       : pss_(new talk_base::PhysicalSocketServer),
         vss_(new talk_base::VirtualSocketServer(pss_.get())),
@@ -331,56 +336,7 @@ TEST_F(PortAllocatorTest, TestSetupVideoRtpPortsWithNormalSendBuffers) {
   // If we Stop gathering now, we shouldn't get a second "done" callback.
   session_->StopGettingPorts();
 
-  // All ports should have normal send-buffer sizes (64KB).
-  CheckSendBufferSizesOfAllPorts(64 * 1024);
-}
-
-TEST_F(PortAllocatorTest, TestSetupVideoRtpPortsWithLargeSendBuffers) {
-  AddInterface(kClientAddr);
-  allocator_->set_flags(allocator_->flags() |
-                        cricket::PORTALLOCATOR_USE_LARGE_SOCKET_SEND_BUFFERS);
-  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP,
-                            cricket::CN_VIDEO));
-  session_->StartGettingPorts();
-  ASSERT_EQ_WAIT(7U, candidates_.size(), kDefaultAllocationTimeout);
-  EXPECT_TRUE(candidate_allocation_done_);
-  // If we Stop gathering now, we shouldn't get a second "done" callback.
-  session_->StopGettingPorts();
-
-  // All ports should have large send-buffer sizes (128KB).
-  CheckSendBufferSizesOfAllPorts(128 * 1024);
-}
-
-TEST_F(PortAllocatorTest, TestSetupVideoRtcpPortsAndCheckSendBuffers) {
-  AddInterface(kClientAddr);
-  allocator_->set_flags(allocator_->flags() |
-                        cricket::PORTALLOCATOR_USE_LARGE_SOCKET_SEND_BUFFERS);
-  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTCP,
-                            cricket::CN_DATA));
-  session_->StartGettingPorts();
-  ASSERT_EQ_WAIT(7U, candidates_.size(), kDefaultAllocationTimeout);
-  EXPECT_TRUE(candidate_allocation_done_);
-  // If we Stop gathering now, we shouldn't get a second "done" callback.
-  session_->StopGettingPorts();
-
-  // No ports should have send-buffer size set.
-  CheckSendBufferSizesOfAllPorts(-1);
-}
-
-
-TEST_F(PortAllocatorTest, TestSetupNonVideoPortsAndCheckSendBuffers) {
-  AddInterface(kClientAddr);
-  allocator_->set_flags(allocator_->flags() |
-                        cricket::PORTALLOCATOR_USE_LARGE_SOCKET_SEND_BUFFERS);
-  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP,
-                            cricket::CN_DATA));
-  session_->StartGettingPorts();
-  ASSERT_EQ_WAIT(7U, candidates_.size(), kDefaultAllocationTimeout);
-  EXPECT_TRUE(candidate_allocation_done_);
-  // If we Stop gathering now, we shouldn't get a second "done" callback.
-  session_->StopGettingPorts();
-
-  // No ports should have send-buffer size set.
+  // All ports should have unset send-buffer sizes.
   CheckSendBufferSizesOfAllPorts(-1);
 }
 
@@ -534,6 +490,23 @@ TEST_F(PortAllocatorTest, TestGetAllPortsNoUdpAllowed) {
       cricket::ICE_CANDIDATE_COMPONENT_RTP, "relay", "udp", kRelayUdpExtAddr);
   // Stun Timeout is 9sec.
   EXPECT_TRUE_WAIT(candidate_allocation_done_, 9000);
+}
+
+TEST_F(PortAllocatorTest, TestCandidatePriorityOfMultipleInterfaces) {
+  AddInterface(kClientAddr);
+  AddInterface(kClientAddr2);
+  // Allocating only host UDP ports. This is done purely for testing
+  // convenience.
+  allocator().set_flags(cricket::PORTALLOCATOR_DISABLE_TCP |
+                        cricket::PORTALLOCATOR_DISABLE_STUN |
+                        cricket::PORTALLOCATOR_DISABLE_RELAY);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
+  session_->StartGettingPorts();
+  EXPECT_TRUE_WAIT(candidate_allocation_done_, kDefaultAllocationTimeout);
+  ASSERT_EQ(2U, candidates_.size());
+  EXPECT_EQ(2U, ports_.size());
+  // Candidates priorities should be different.
+  EXPECT_NE(candidates_[0].priority(), candidates_[1].priority());
 }
 
 // Test to verify ICE restart process.

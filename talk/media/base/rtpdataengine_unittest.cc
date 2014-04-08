@@ -31,6 +31,7 @@
 #include "talk/base/gunit.h"
 #include "talk/base/helpers.h"
 #include "talk/base/scoped_ptr.h"
+#include "talk/base/ssladapter.h"
 #include "talk/base/timing.h"
 #include "talk/media/base/constants.h"
 #include "talk/media/base/fakenetworkinterface.h"
@@ -82,6 +83,14 @@ class FakeDataReceiver : public sigslot::has_slots<> {
 
 class RtpDataMediaChannelTest : public testing::Test {
  protected:
+  static void SetUpTestCase() {
+    talk_base::InitializeSSL();
+  }
+
+  static void TearDownTestCase() {
+    talk_base::CleanupSSL();
+  }
+
   virtual void SetUp() {
     // Seed needed for each test to satisfy expectations.
     iface_.reset(new cricket::FakeNetworkInterface());
@@ -387,7 +396,7 @@ TEST_F(RtpDataMediaChannelTest, SendDataRate) {
   // With rtp overhead of 32 bytes, each one of our packets is 36
   // bytes, or 288 bits.  So, a limit of 872bps will allow 3 packets,
   // but not four.
-  dmc->SetSendBandwidth(false, 872);
+  dmc->SetMaxSendBandwidth(872);
 
   EXPECT_TRUE(dmc->SendData(params, payload, &result));
   EXPECT_TRUE(dmc->SendData(params, payload, &result));
@@ -423,13 +432,13 @@ TEST_F(RtpDataMediaChannelTest, ReceiveData) {
   talk_base::scoped_ptr<cricket::RtpDataMediaChannel> dmc(CreateChannel());
 
   // SetReceived not called.
-  dmc->OnPacketReceived(&packet);
+  dmc->OnPacketReceived(&packet, talk_base::PacketTime());
   EXPECT_FALSE(HasReceivedData());
 
   dmc->SetReceive(true);
 
   // Unknown payload id
-  dmc->OnPacketReceived(&packet);
+  dmc->OnPacketReceived(&packet, talk_base::PacketTime());
   EXPECT_FALSE(HasReceivedData());
 
   cricket::DataCodec codec;
@@ -440,7 +449,7 @@ TEST_F(RtpDataMediaChannelTest, ReceiveData) {
   ASSERT_TRUE(dmc->SetRecvCodecs(codecs));
 
   // Unknown stream
-  dmc->OnPacketReceived(&packet);
+  dmc->OnPacketReceived(&packet, talk_base::PacketTime());
   EXPECT_FALSE(HasReceivedData());
 
   cricket::StreamParams stream;
@@ -448,7 +457,7 @@ TEST_F(RtpDataMediaChannelTest, ReceiveData) {
   ASSERT_TRUE(dmc->AddRecvStream(stream));
 
   // Finally works!
-  dmc->OnPacketReceived(&packet);
+  dmc->OnPacketReceived(&packet, talk_base::PacketTime());
   EXPECT_TRUE(HasReceivedData());
   EXPECT_EQ("abcde", GetReceivedData());
   EXPECT_EQ(5U, GetReceivedDataLen());
@@ -463,6 +472,6 @@ TEST_F(RtpDataMediaChannelTest, InvalidRtpPackets) {
   talk_base::scoped_ptr<cricket::RtpDataMediaChannel> dmc(CreateChannel());
 
   // Too short
-  dmc->OnPacketReceived(&packet);
+  dmc->OnPacketReceived(&packet, talk_base::PacketTime());
   EXPECT_FALSE(HasReceivedData());
 }

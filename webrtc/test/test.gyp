@@ -42,6 +42,28 @@
       ],
     },
     {
+      'target_name': 'frame_generator',
+      'type': 'static_library',
+      'sources': [
+        'frame_generator.cc',
+        'frame_generator.h',
+      ],
+      'dependencies': [
+        '<(webrtc_root)/common_video/common_video.gyp:common_video',
+      ],
+    },
+    {
+      'target_name': 'rtcp_packet_parser',
+      'type': 'static_library',
+      'sources': [
+        'rtcp_packet_parser.cc',
+        'rtcp_packet_parser.h',
+      ],
+      'dependencies': [
+        '<(webrtc_root)/modules/modules.gyp:rtp_rtcp',
+      ],
+    },
+    {
       'target_name': 'test_support',
       'type': 'static_library',
       'dependencies': [
@@ -82,21 +104,6 @@
           'sources!': [
             'testsupport/android/root_path_android.cc',
           ],
-          # WebRTC tests use resource files for testing. These files are not
-          # hosted in WebRTC. The script ensures that the needed resources
-          # are downloaded. In stand alone WebRTC the script is called by
-          # the DEPS file. In Chromium, i.e. here, the files are pulled down
-          # only if tests requiring the resources are being built.
-          'actions': [
-            {
-              'action_name': 'get_resources',
-              'inputs': ['<(webrtc_root)/tools/update_resources.py'],
-              'outputs': ['../../../resources'],
-              'action': ['python',
-                         '<(webrtc_root)/tools/update_resources.py',
-                         '-p',
-                         '../../../'],
-            }],
         }, {
           'sources!': [
             'testsupport/android/root_path_android_chromium.cc',

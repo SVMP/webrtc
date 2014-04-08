@@ -9,16 +9,16 @@
  */
 
 #include <stdio.h>
-
 #include <algorithm>
 #include <queue>
 
+#include "webrtc/common_audio/include/audio_util.h"
 #include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
+#include "webrtc/modules/audio_processing/test/test_utils.h"
 #include "webrtc/modules/interface/module_common_types.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
-#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 #include "webrtc/test/testsupport/fileutils.h"
 #include "webrtc/test/testsupport/gtest_disable.h"
@@ -35,21 +35,11 @@
 #  define WEBRTC_AUDIOPROC_BIT_EXACT
 #endif
 
-using webrtc::AudioProcessing;
-using webrtc::AudioFrame;
-using webrtc::GainControl;
-using webrtc::NoiseSuppression;
-using webrtc::EchoCancellation;
-using webrtc::EventWrapper;
-using webrtc::scoped_array;
-using webrtc::scoped_ptr;
-using webrtc::Trace;
-using webrtc::LevelEstimator;
-using webrtc::EchoCancellation;
-using webrtc::EchoControlMobile;
-using webrtc::VoiceDetection;
-
+namespace webrtc {
 namespace {
+
+// TODO(bjornv): This is not feasible until the functionality has been
+// re-implemented; see comment at the bottom of this file.
 // When false, this will compare the output data with the results stored to
 // file. This is the typical case. When the file should be updated, it can
 // be set to true with the command-line switch --write_ref_data.
@@ -70,6 +60,18 @@ const int kProcessSampleRates[] = {8000, 16000, 32000};
 #endif
 const size_t kProcessSampleRatesSize = sizeof(kProcessSampleRates) /
     sizeof(*kProcessSampleRates);
+
+void ConvertToFloat(const AudioFrame& frame, ChannelBuffer<float>* cb) {
+  ChannelBuffer<int16_t> cb_int(frame.samples_per_channel_,
+                                frame.num_channels_);
+  Deinterleave(frame.data_,
+               frame.samples_per_channel_,
+               frame.num_channels_,
+               cb_int.channels());
+  ScaleToFloat(cb_int.data(),
+               frame.samples_per_channel_ * frame.num_channels_,
+               cb->data());
+}
 
 int TruncateToMultipleOf10(int value) {
   return (value / 10) * 10;
@@ -99,8 +101,7 @@ void VerifyChannelsAreEqual(int16_t* stereo, int samples_per_channel) {
 }
 
 void SetFrameTo(AudioFrame* frame, int16_t value) {
-  for (int i = 0; i < frame->samples_per_channel_ * frame->num_channels_;
-      ++i) {
+  for (int i = 0; i < frame->samples_per_channel_ * frame->num_channels_; ++i) {
     frame->data_[i] = value;
   }
 }
@@ -113,6 +114,53 @@ void SetFrameTo(AudioFrame* frame, int16_t left, int16_t right) {
   }
 }
 
+void ScaleFrame(AudioFrame* frame, float scale) {
+  for (int i = 0; i < frame->samples_per_channel_ * frame->num_channels_; ++i) {
+    frame->data_[i] = RoundToInt16(frame->data_[i] * scale);
+  }
+}
+
+bool FrameDataAreEqual(const AudioFrame& frame1, const AudioFrame& frame2) {
+  if (frame1.samples_per_channel_ != frame2.samples_per_channel_) {
+    return false;
+  }
+  if (frame1.num_channels_ != frame2.num_channels_) {
+    return false;
+  }
+  if (memcmp(frame1.data_, frame2.data_,
+             frame1.samples_per_channel_ * frame1.num_channels_ *
+                 sizeof(int16_t))) {
+    return false;
+  }
+  return true;
+}
+
+void EnableAllAPComponents(AudioProcessing* ap) {
+#if defined(WEBRTC_AUDIOPROC_FIXED_PROFILE)
+  EXPECT_NOERR(ap->echo_control_mobile()->Enable(true));
+
+  EXPECT_NOERR(ap->gain_control()->set_mode(GainControl::kAdaptiveDigital));
+  EXPECT_NOERR(ap->gain_control()->Enable(true));
+#elif defined(WEBRTC_AUDIOPROC_FLOAT_PROFILE)
+  EXPECT_NOERR(ap->echo_cancellation()->enable_drift_compensation(true));
+  EXPECT_NOERR(ap->echo_cancellation()->enable_metrics(true));
+  EXPECT_NOERR(ap->echo_cancellation()->enable_delay_logging(true));
+  EXPECT_NOERR(ap->echo_cancellation()->Enable(true));
+
+  EXPECT_NOERR(ap->gain_control()->set_mode(GainControl::kAdaptiveAnalog));
+  EXPECT_NOERR(ap->gain_control()->set_analog_level_limits(0, 255));
+  EXPECT_NOERR(ap->gain_control()->Enable(true));
+#endif
+
+  EXPECT_NOERR(ap->high_pass_filter()->Enable(true));
+  EXPECT_NOERR(ap->level_estimator()->Enable(true));
+  EXPECT_NOERR(ap->noise_suppression()->Enable(true));
+
+  EXPECT_NOERR(ap->voice_detection()->Enable(true));
+}
+
+#ifdef WEBRTC_AUDIOPROC_BIT_EXACT
+// These functions are only used by the bit-exact test.
 template <class T>
 T AbsValue(T a) {
   return a > 0 ? a: -a;
@@ -128,25 +176,9 @@ int16_t MaxAudioFrame(const AudioFrame& frame) {
   return max_data;
 }
 
-bool FrameDataAreEqual(const AudioFrame& frame1, const AudioFrame& frame2) {
-  if (frame1.samples_per_channel_ !=
-      frame2.samples_per_channel_) {
-    return false;
-  }
-  if (frame1.num_channels_ !=
-      frame2.num_channels_) {
-    return false;
-  }
-  if (memcmp(frame1.data_, frame2.data_,
-             frame1.samples_per_channel_ * frame1.num_channels_ *
-               sizeof(int16_t))) {
-    return false;
-  }
-  return true;
-}
-
+#if defined(WEBRTC_AUDIOPROC_FLOAT_PROFILE)
 void TestStats(const AudioProcessing::Statistic& test,
-               const webrtc::audioproc::Test::Statistic& reference) {
+               const audioproc::Test::Statistic& reference) {
   EXPECT_EQ(reference.instant(), test.instant);
   EXPECT_EQ(reference.average(), test.average);
   EXPECT_EQ(reference.maximum(), test.maximum);
@@ -154,58 +186,38 @@ void TestStats(const AudioProcessing::Statistic& test,
 }
 
 void WriteStatsMessage(const AudioProcessing::Statistic& output,
-                       webrtc::audioproc::Test::Statistic* message) {
-  message->set_instant(output.instant);
-  message->set_average(output.average);
-  message->set_maximum(output.maximum);
-  message->set_minimum(output.minimum);
+                       audioproc::Test::Statistic* msg) {
+  msg->set_instant(output.instant);
+  msg->set_average(output.average);
+  msg->set_maximum(output.maximum);
+  msg->set_minimum(output.minimum);
 }
+#endif
 
-void WriteMessageLiteToFile(const std::string filename,
-                            const ::google::protobuf::MessageLite& message) {
+void OpenFileAndWriteMessage(const std::string filename,
+                             const ::google::protobuf::MessageLite& msg) {
   FILE* file = fopen(filename.c_str(), "wb");
-  ASSERT_TRUE(file != NULL) << "Could not open " << filename;
-  int size = message.ByteSize();
+  ASSERT_TRUE(file != NULL);
+
+  int32_t size = msg.ByteSize();
   ASSERT_GT(size, 0);
-  unsigned char* array = new unsigned char[size];
-  ASSERT_TRUE(message.SerializeToArray(array, size));
+  scoped_ptr<uint8_t[]> array(new uint8_t[size]);
+  ASSERT_TRUE(msg.SerializeToArray(array.get(), size));
 
-  ASSERT_EQ(1u, fwrite(&size, sizeof(int), 1, file));
+  ASSERT_EQ(1u, fwrite(&size, sizeof(size), 1, file));
   ASSERT_EQ(static_cast<size_t>(size),
-      fwrite(array, sizeof(unsigned char), size, file));
-
-  delete [] array;
+      fwrite(array.get(), sizeof(array[0]), size, file));
   fclose(file);
 }
+#endif  // WEBRTC_AUDIOPROC_BIT_EXACT
 
-void ReadMessageLiteFromFile(const std::string filename,
-                             ::google::protobuf::MessageLite* message) {
-  assert(message != NULL);
-
+void OpenFileAndReadMessage(const std::string filename,
+                            ::google::protobuf::MessageLite* msg) {
   FILE* file = fopen(filename.c_str(), "rb");
-  ASSERT_TRUE(file != NULL) << "Could not open " << filename;
-  int size = 0;
-  ASSERT_EQ(1u, fread(&size, sizeof(int), 1, file));
-  ASSERT_GT(size, 0);
-  unsigned char* array = new unsigned char[size];
-  ASSERT_EQ(static_cast<size_t>(size),
-      fread(array, sizeof(unsigned char), size, file));
-
-  ASSERT_TRUE(message->ParseFromArray(array, size));
-
-  delete [] array;
+  ASSERT_TRUE(file != NULL);
+  ReadMessageFromFile(file, msg);
   fclose(file);
 }
-
-struct ThreadData {
-  ThreadData(int thread_num_, AudioProcessing* ap_)
-      : thread_num(thread_num_),
-        error(false),
-        ap(ap_) {}
-  int thread_num;
-  bool error;
-  AudioProcessing* ap;
-};
 
 class ApmTest : public ::testing::Test {
  protected:
@@ -215,8 +227,7 @@ class ApmTest : public ::testing::Test {
 
   static void SetUpTestCase() {
     Trace::CreateTrace();
-    std::string trace_filename = webrtc::test::OutputPath() +
-        "audioproc_trace.txt";
+    std::string trace_filename = test::OutputPath() + "audioproc_trace.txt";
     ASSERT_EQ(0, Trace::SetTraceFile(trace_filename.c_str()));
   }
 
@@ -224,9 +235,19 @@ class ApmTest : public ::testing::Test {
     Trace::ReturnTrace();
   }
 
-  void Init(int sample_rate_hz, int num_reverse_channels,
-            int num_input_channels, int num_output_channels,
+  // Used to select between int and float interface tests.
+  enum Format {
+    kIntFormat,
+    kFloatFormat
+  };
+
+  void Init(int sample_rate_hz,
+            int reverse_sample_rate_hz,
+            int num_reverse_channels,
+            int num_input_channels,
+            int num_output_channels,
             bool open_output_file);
+  void Init(AudioProcessing* ap);
   std::string ResourceFilePath(std::string name, int sample_rate_hz);
   std::string OutputFilePath(std::string name,
                              int sample_rate_hz,
@@ -235,39 +256,58 @@ class ApmTest : public ::testing::Test {
                              int num_output_channels);
   void EnableAllComponents();
   bool ReadFrame(FILE* file, AudioFrame* frame);
+  bool ReadFrame(FILE* file, AudioFrame* frame, ChannelBuffer<float>* cb);
+  void ReadFrameWithRewind(FILE* file, AudioFrame* frame);
+  void ReadFrameWithRewind(FILE* file, AudioFrame* frame,
+                           ChannelBuffer<float>* cb);
   void ProcessWithDefaultStreamParameters(AudioFrame* frame);
-  template <typename F>
-  void ChangeTriggersInit(F f, AudioProcessing* ap, int initial_value,
-                          int changed_value);
   void ProcessDelayVerificationTest(int delay_ms, int system_delay_ms,
                                     int delay_min, int delay_max);
+  void TestChangingChannels(int num_channels,
+                            AudioProcessing::Error expected_return);
+  void RunQuantizedVolumeDoesNotGetStuckTest(int sample_rate);
+  void RunManualVolumeChangeIsPossibleTest(int sample_rate);
+  void StreamParametersTest(Format format);
+  void SampleRatesTest(Format format);
+  int ProcessStreamChooser(Format format);
+  int AnalyzeReverseStreamChooser(Format format);
+  void ProcessDebugDump(const std::string& in_filename,
+                        const std::string& out_filename,
+                        Format format);
+  void VerifyDebugDumpTest(Format format);
 
   const std::string output_path_;
   const std::string ref_path_;
   const std::string ref_filename_;
-  scoped_ptr<webrtc::AudioProcessing> apm_;
+  scoped_ptr<AudioProcessing> apm_;
   AudioFrame* frame_;
   AudioFrame* revframe_;
+  scoped_ptr<ChannelBuffer<float> > float_cb_;
+  scoped_ptr<ChannelBuffer<float> > revfloat_cb_;
+  int num_output_channels_;
   FILE* far_file_;
   FILE* near_file_;
   FILE* out_file_;
 };
 
 ApmTest::ApmTest()
-    : output_path_(webrtc::test::OutputPath()),
-      ref_path_(webrtc::test::ProjectRootPath() +
-                "data/audio_processing/"),
+    : output_path_(test::OutputPath()),
+      ref_path_(test::ProjectRootPath() + "data/audio_processing/"),
 #if defined(WEBRTC_AUDIOPROC_FIXED_PROFILE)
       ref_filename_(ref_path_ + "output_data_fixed.pb"),
 #elif defined(WEBRTC_AUDIOPROC_FLOAT_PROFILE)
       ref_filename_(ref_path_ + "output_data_float.pb"),
 #endif
-      apm_(AudioProcessing::Create(0)),
       frame_(NULL),
       revframe_(NULL),
+      num_output_channels_(0),
       far_file_(NULL),
       near_file_(NULL),
-      out_file_(NULL) {}
+      out_file_(NULL) {
+  Config config;
+  config.Set<ExperimentalAgc>(new ExperimentalAgc(false));
+  apm_.reset(AudioProcessing::Create(config));
+}
 
 void ApmTest::SetUp() {
   ASSERT_TRUE(apm_.get() != NULL);
@@ -275,7 +315,11 @@ void ApmTest::SetUp() {
   frame_ = new AudioFrame();
   revframe_ = new AudioFrame();
 
-  Init(32000, 2, 2, 2, false);
+#if defined(WEBRTC_AUDIOPROC_FIXED_PROFILE)
+  Init(16000, 16000, 2, 2, 2, false);
+#else
+  Init(32000, 32000, 2, 2, 2, false);
+#endif
 }
 
 void ApmTest::TearDown() {
@@ -309,7 +353,7 @@ std::string ApmTest::ResourceFilePath(std::string name, int sample_rate_hz) {
   std::ostringstream ss;
   // Resource files are all stereo.
   ss << name << sample_rate_hz / 1000 << "_stereo";
-  return webrtc::test::ResourcePath(ss.str(), "pcm");
+  return test::ResourcePath(ss.str(), "pcm");
 }
 
 std::string ApmTest::OutputFilePath(std::string name,
@@ -333,26 +377,26 @@ std::string ApmTest::OutputFilePath(std::string name,
   return output_path_ + ss.str();
 }
 
-void ApmTest::Init(int sample_rate_hz, int num_reverse_channels,
-                   int num_input_channels, int num_output_channels,
+void ApmTest::Init(AudioProcessing* ap) {
+  ASSERT_EQ(ap->kNoError, ap->Initialize(frame_->sample_rate_hz_,
+                                         revframe_->sample_rate_hz_,
+                                         frame_->num_channels_,
+                                         num_output_channels_,
+                                         revframe_->num_channels_));
+}
+
+void ApmTest::Init(int sample_rate_hz,
+                   int reverse_sample_rate_hz,
+                   int num_input_channels,
+                   int num_output_channels,
+                   int num_reverse_channels,
                    bool open_output_file) {
-  ASSERT_EQ(apm_->kNoError, apm_->Initialize());
+  SetContainerFormat(sample_rate_hz, num_input_channels, frame_, &float_cb_);
+  num_output_channels_ = num_output_channels;
 
-  // Handles error checking of the parameters as well. No need to repeat it.
-  ASSERT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(sample_rate_hz));
-  ASSERT_EQ(apm_->kNoError, apm_->set_num_channels(num_input_channels,
-                                                   num_output_channels));
-  ASSERT_EQ(apm_->kNoError,
-            apm_->set_num_reverse_channels(num_reverse_channels));
-
-  // We always use 10 ms frames.
-  const int samples_per_channel = sample_rate_hz / 100;
-  frame_->samples_per_channel_ = samples_per_channel;
-  frame_->num_channels_ = num_input_channels;
-  frame_->sample_rate_hz_ = sample_rate_hz;
-  revframe_->samples_per_channel_ = samples_per_channel;
-  revframe_->num_channels_ = num_reverse_channels;
-  revframe_->sample_rate_hz_ = sample_rate_hz;
+  SetContainerFormat(reverse_sample_rate_hz, num_reverse_channels, revframe_,
+                     &revfloat_cb_);
+  Init(apm_.get());
 
   if (far_file_) {
     ASSERT_EQ(0, fclose(far_file_));
@@ -383,43 +427,11 @@ void ApmTest::Init(int sample_rate_hz, int num_reverse_channels,
 }
 
 void ApmTest::EnableAllComponents() {
-#if defined(WEBRTC_AUDIOPROC_FIXED_PROFILE)
-  EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(16000));
-  EXPECT_EQ(apm_->kNoError, apm_->echo_control_mobile()->Enable(true));
-
-  EXPECT_EQ(apm_->kNoError,
-            apm_->gain_control()->set_mode(GainControl::kAdaptiveDigital));
-  EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(true));
-#elif defined(WEBRTC_AUDIOPROC_FLOAT_PROFILE)
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->enable_drift_compensation(true));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->enable_metrics(true));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->enable_delay_logging(true));
-  EXPECT_EQ(apm_->kNoError, apm_->echo_cancellation()->Enable(true));
-
-  EXPECT_EQ(apm_->kNoError,
-            apm_->gain_control()->set_mode(GainControl::kAdaptiveAnalog));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->gain_control()->set_analog_level_limits(0, 255));
-  EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(true));
-#endif
-
-  EXPECT_EQ(apm_->kNoError,
-            apm_->high_pass_filter()->Enable(true));
-
-  EXPECT_EQ(apm_->kNoError,
-            apm_->level_estimator()->Enable(true));
-
-  EXPECT_EQ(apm_->kNoError,
-            apm_->noise_suppression()->Enable(true));
-
-  EXPECT_EQ(apm_->kNoError,
-            apm_->voice_detection()->Enable(true));
+  EnableAllAPComponents(apm_.get());
 }
 
-bool ApmTest::ReadFrame(FILE* file, AudioFrame* frame) {
+bool ApmTest::ReadFrame(FILE* file, AudioFrame* frame,
+                        ChannelBuffer<float>* cb) {
   // The files always contain stereo audio.
   size_t frame_size = frame->samples_per_channel_ * 2;
   size_t read_count = fread(frame->data_,
@@ -437,7 +449,28 @@ bool ApmTest::ReadFrame(FILE* file, AudioFrame* frame) {
                     frame->samples_per_channel_);
   }
 
+  if (cb) {
+    ConvertToFloat(*frame, cb);
+  }
   return true;
+}
+
+bool ApmTest::ReadFrame(FILE* file, AudioFrame* frame) {
+  return ReadFrame(file, frame, NULL);
+}
+
+// If the end of the file has been reached, rewind it and attempt to read the
+// frame again.
+void ApmTest::ReadFrameWithRewind(FILE* file, AudioFrame* frame,
+                                  ChannelBuffer<float>* cb) {
+  if (!ReadFrame(near_file_, frame_, cb)) {
+    rewind(near_file_);
+    ASSERT_TRUE(ReadFrame(near_file_, frame_, cb));
+  }
+}
+
+void ApmTest::ReadFrameWithRewind(FILE* file, AudioFrame* frame) {
+  ReadFrameWithRewind(file, frame, NULL);
 }
 
 void ApmTest::ProcessWithDefaultStreamParameters(AudioFrame* frame) {
@@ -448,56 +481,35 @@ void ApmTest::ProcessWithDefaultStreamParameters(AudioFrame* frame) {
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame));
 }
 
-template <typename F>
-void ApmTest::ChangeTriggersInit(F f, AudioProcessing* ap, int initial_value,
-                                 int changed_value) {
-  EnableAllComponents();
-  Init(16000, 2, 2, 2, false);
-  SetFrameTo(frame_, 1000);
-  AudioFrame frame_copy;
-  frame_copy.CopyFrom(*frame_);
-  ProcessWithDefaultStreamParameters(frame_);
-  // Verify the processing has actually changed the frame.
-  EXPECT_FALSE(FrameDataAreEqual(*frame_, frame_copy));
+int ApmTest::ProcessStreamChooser(Format format) {
+  if (format == kIntFormat) {
+    return apm_->ProcessStream(frame_);
+  }
+  // TODO(ajm): Update to match the number of output channels when supported.
+  return apm_->ProcessStream(float_cb_->channels(),
+                             frame_->samples_per_channel_,
+                             frame_->sample_rate_hz_,
+                             LayoutFromChannels(frame_->num_channels_),
+                             LayoutFromChannels(frame_->num_channels_));
+}
 
-  // Test that a change in value triggers an init.
-  f(apm_.get(), changed_value);
-  f(apm_.get(), initial_value);
-  ProcessWithDefaultStreamParameters(&frame_copy);
-  EXPECT_TRUE(FrameDataAreEqual(*frame_, frame_copy));
-
-  apm_->Initialize();
-  SetFrameTo(frame_, 1000);
-  AudioFrame initial_frame;
-  initial_frame.CopyFrom(*frame_);
-  ProcessWithDefaultStreamParameters(frame_);
-  ProcessWithDefaultStreamParameters(frame_);
-  // Verify the processing has actually changed the frame.
-  EXPECT_FALSE(FrameDataAreEqual(*frame_, initial_frame));
-
-  frame_copy.CopyFrom(initial_frame);
-  apm_->Initialize();
-  ProcessWithDefaultStreamParameters(&frame_copy);
-  // Verify an init here would result in different output.
-  apm_->Initialize();
-  ProcessWithDefaultStreamParameters(&frame_copy);
-  EXPECT_FALSE(FrameDataAreEqual(*frame_, frame_copy));
-
-  frame_copy.CopyFrom(initial_frame);
-  apm_->Initialize();
-  ProcessWithDefaultStreamParameters(&frame_copy);
-  // Test that the same value does not trigger an init.
-  f(apm_.get(), initial_value);
-  ProcessWithDefaultStreamParameters(&frame_copy);
-  EXPECT_TRUE(FrameDataAreEqual(*frame_, frame_copy));
+int ApmTest::AnalyzeReverseStreamChooser(Format format) {
+  if (format == kIntFormat) {
+    return apm_->AnalyzeReverseStream(revframe_);
+  }
+  return apm_->AnalyzeReverseStream(
+      revfloat_cb_->channels(),
+      revframe_->samples_per_channel_,
+      revframe_->sample_rate_hz_,
+      LayoutFromChannels(revframe_->num_channels_));
 }
 
 void ApmTest::ProcessDelayVerificationTest(int delay_ms, int system_delay_ms,
                                            int delay_min, int delay_max) {
   // The |revframe_| and |frame_| should include the proper frame information,
   // hence can be used for extracting information.
-  webrtc::AudioFrame tmp_frame;
-  std::queue<webrtc::AudioFrame*> frame_queue;
+  AudioFrame tmp_frame;
+  std::queue<AudioFrame*> frame_queue;
   bool causal = true;
 
   tmp_frame.CopyFrom(*revframe_);
@@ -507,30 +519,30 @@ void ApmTest::ProcessDelayVerificationTest(int delay_ms, int system_delay_ms,
   // Initialize the |frame_queue| with empty frames.
   int frame_delay = delay_ms / 10;
   while (frame_delay < 0) {
-    webrtc::AudioFrame* frame = new AudioFrame();
+    AudioFrame* frame = new AudioFrame();
     frame->CopyFrom(tmp_frame);
     frame_queue.push(frame);
     frame_delay++;
     causal = false;
   }
   while (frame_delay > 0) {
-    webrtc::AudioFrame* frame = new AudioFrame();
+    AudioFrame* frame = new AudioFrame();
     frame->CopyFrom(tmp_frame);
     frame_queue.push(frame);
     frame_delay--;
   }
-  // Run for 4.5 seconds, skipping statistics from the first second. We need
-  // enough frames with audio to have reliable estimates, but as few as possible
-  // to keep processing time down. 4.5 seconds seemed to be a good compromise
-  // for this recording.
+  // Run for 4.5 seconds, skipping statistics from the first 2.5 seconds.  We
+  // need enough frames with audio to have reliable estimates, but as few as
+  // possible to keep processing time down.  4.5 seconds seemed to be a good
+  // compromise for this recording.
   for (int frame_count = 0; frame_count < 450; ++frame_count) {
-    webrtc::AudioFrame* frame = new AudioFrame();
+    AudioFrame* frame = new AudioFrame();
     frame->CopyFrom(tmp_frame);
     // Use the near end recording, since that has more speech in it.
     ASSERT_TRUE(ReadFrame(near_file_, frame));
     frame_queue.push(frame);
-    webrtc::AudioFrame* reverse_frame = frame;
-    webrtc::AudioFrame* process_frame = frame_queue.front();
+    AudioFrame* reverse_frame = frame;
+    AudioFrame* process_frame = frame_queue.front();
     if (!causal) {
       reverse_frame = frame_queue.front();
       // When we call ProcessStream() the frame is modified, so we can't use the
@@ -546,7 +558,7 @@ void ApmTest::ProcessDelayVerificationTest(int delay_ms, int system_delay_ms,
     frame_queue.pop();
     delete frame;
 
-    if (frame_count == 100) {
+    if (frame_count == 250) {
       int median;
       int std;
       // Discard the first delay metrics to avoid convergence effects.
@@ -557,7 +569,7 @@ void ApmTest::ProcessDelayVerificationTest(int delay_ms, int system_delay_ms,
 
   rewind(near_file_);
   while (!frame_queue.empty()) {
-    webrtc::AudioFrame* frame = frame_queue.front();
+    AudioFrame* frame = frame_queue.front();
     frame_queue.pop();
     delete frame;
   }
@@ -579,21 +591,21 @@ void ApmTest::ProcessDelayVerificationTest(int delay_ms, int system_delay_ms,
   EXPECT_LE(expected_median_low, median);
 }
 
-TEST_F(ApmTest, StreamParameters) {
+void ApmTest::StreamParametersTest(Format format) {
   // No errors when the components are disabled.
-  EXPECT_EQ(apm_->kNoError,
-            apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kNoError, ProcessStreamChooser(format));
 
   // -- Missing AGC level --
-  EXPECT_EQ(apm_->kNoError, apm_->Initialize());
   EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(true));
-  EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kStreamParameterNotSetError,
+            ProcessStreamChooser(format));
 
   // Resets after successful ProcessStream().
   EXPECT_EQ(apm_->kNoError,
             apm_->gain_control()->set_stream_analog_level(127));
-  EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
-  EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kNoError, ProcessStreamChooser(format));
+  EXPECT_EQ(apm_->kStreamParameterNotSetError,
+            ProcessStreamChooser(format));
 
   // Other stream parameters set correctly.
   EXPECT_EQ(apm_->kNoError, apm_->echo_cancellation()->Enable(true));
@@ -602,20 +614,22 @@ TEST_F(ApmTest, StreamParameters) {
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(100));
   apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kStreamParameterNotSetError,
-            apm_->ProcessStream(frame_));
+            ProcessStreamChooser(format));
   EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(false));
   EXPECT_EQ(apm_->kNoError,
             apm_->echo_cancellation()->enable_drift_compensation(false));
 
   // -- Missing delay --
-  EXPECT_EQ(apm_->kNoError, apm_->Initialize());
   EXPECT_EQ(apm_->kNoError, apm_->echo_cancellation()->Enable(true));
-  EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kNoError, ProcessStreamChooser(format));
+  EXPECT_EQ(apm_->kStreamParameterNotSetError,
+            ProcessStreamChooser(format));
 
   // Resets after successful ProcessStream().
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(100));
-  EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
-  EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kNoError, ProcessStreamChooser(format));
+  EXPECT_EQ(apm_->kStreamParameterNotSetError,
+            ProcessStreamChooser(format));
 
   // Other stream parameters set correctly.
   EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(true));
@@ -624,40 +638,49 @@ TEST_F(ApmTest, StreamParameters) {
   apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError,
             apm_->gain_control()->set_stream_analog_level(127));
-  EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kStreamParameterNotSetError,
+            ProcessStreamChooser(format));
   EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(false));
 
   // -- Missing drift --
-  EXPECT_EQ(apm_->kNoError, apm_->Initialize());
-  EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kStreamParameterNotSetError,
+            ProcessStreamChooser(format));
 
   // Resets after successful ProcessStream().
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(100));
   apm_->echo_cancellation()->set_stream_drift_samples(0);
-  EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
-  EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kNoError, ProcessStreamChooser(format));
+  EXPECT_EQ(apm_->kStreamParameterNotSetError,
+            ProcessStreamChooser(format));
 
   // Other stream parameters set correctly.
   EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(true));
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(100));
   EXPECT_EQ(apm_->kNoError,
             apm_->gain_control()->set_stream_analog_level(127));
-  EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kStreamParameterNotSetError,
+            ProcessStreamChooser(format));
 
   // -- No stream parameters --
-  EXPECT_EQ(apm_->kNoError, apm_->Initialize());
   EXPECT_EQ(apm_->kNoError,
-            apm_->AnalyzeReverseStream(revframe_));
+            AnalyzeReverseStreamChooser(format));
   EXPECT_EQ(apm_->kStreamParameterNotSetError,
-            apm_->ProcessStream(frame_));
+            ProcessStreamChooser(format));
 
   // -- All there --
-  EXPECT_EQ(apm_->kNoError, apm_->Initialize());
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(100));
   apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError,
             apm_->gain_control()->set_stream_analog_level(127));
-  EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kNoError, ProcessStreamChooser(format));
+}
+
+TEST_F(ApmTest, StreamParametersInt) {
+  StreamParametersTest(kIntFormat);
+}
+
+TEST_F(ApmTest, StreamParametersFloat) {
+  StreamParametersTest(kFloatFormat);
 }
 
 TEST_F(ApmTest, DefaultDelayOffsetIsZero) {
@@ -684,63 +707,44 @@ TEST_F(ApmTest, DelayOffsetWithLimitsIsSetProperly) {
   EXPECT_EQ(50, apm_->stream_delay_ms());
 }
 
+void ApmTest::TestChangingChannels(int num_channels,
+                                   AudioProcessing::Error expected_return) {
+  frame_->num_channels_ = num_channels;
+  EXPECT_EQ(expected_return, apm_->ProcessStream(frame_));
+  EXPECT_EQ(expected_return, apm_->AnalyzeReverseStream(frame_));
+}
+
 TEST_F(ApmTest, Channels) {
-  // Testing number of invalid channels
-  EXPECT_EQ(apm_->kBadParameterError, apm_->set_num_channels(0, 1));
-  EXPECT_EQ(apm_->kBadParameterError, apm_->set_num_channels(1, 0));
-  EXPECT_EQ(apm_->kBadParameterError, apm_->set_num_channels(3, 1));
-  EXPECT_EQ(apm_->kBadParameterError, apm_->set_num_channels(1, 3));
-  EXPECT_EQ(apm_->kBadParameterError, apm_->set_num_reverse_channels(0));
-  EXPECT_EQ(apm_->kBadParameterError, apm_->set_num_reverse_channels(3));
-  // Testing number of valid channels
+  // Testing number of invalid channels.
+  TestChangingChannels(0, apm_->kBadNumberChannelsError);
+  TestChangingChannels(3, apm_->kBadNumberChannelsError);
+  // Testing number of valid channels.
   for (int i = 1; i < 3; i++) {
-    for (int j = 1; j < 3; j++) {
-      if (j > i) {
-        EXPECT_EQ(apm_->kBadParameterError, apm_->set_num_channels(i, j));
-      } else {
-        EXPECT_EQ(apm_->kNoError, apm_->set_num_channels(i, j));
-        EXPECT_EQ(j, apm_->num_output_channels());
-      }
-    }
+    TestChangingChannels(i, kNoErr);
     EXPECT_EQ(i, apm_->num_input_channels());
-    EXPECT_EQ(apm_->kNoError, apm_->set_num_reverse_channels(i));
     EXPECT_EQ(i, apm_->num_reverse_channels());
   }
 }
 
-TEST_F(ApmTest, SampleRates) {
+void ApmTest::SampleRatesTest(Format format) {
   // Testing invalid sample rates
-  EXPECT_EQ(apm_->kBadParameterError, apm_->set_sample_rate_hz(10000));
+  SetContainerFormat(10000, 2, frame_, &float_cb_);
+  EXPECT_EQ(apm_->kBadSampleRateError, ProcessStreamChooser(format));
   // Testing valid sample rates
   int fs[] = {8000, 16000, 32000};
   for (size_t i = 0; i < sizeof(fs) / sizeof(*fs); i++) {
-    EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(fs[i]));
+    SetContainerFormat(fs[i], 2, frame_, &float_cb_);
+    EXPECT_NOERR(ProcessStreamChooser(format));
     EXPECT_EQ(fs[i], apm_->sample_rate_hz());
   }
 }
 
-void SetSampleRate(AudioProcessing* ap, int value) {
-  EXPECT_EQ(ap->kNoError, ap->set_sample_rate_hz(value));
+TEST_F(ApmTest, SampleRatesInt) {
+  SampleRatesTest(kIntFormat);
 }
 
-void SetNumReverseChannels(AudioProcessing* ap, int value) {
-  EXPECT_EQ(ap->kNoError, ap->set_num_reverse_channels(value));
-}
-
-void SetNumOutputChannels(AudioProcessing* ap, int value) {
-  EXPECT_EQ(ap->kNoError, ap->set_num_channels(2, value));
-}
-
-TEST_F(ApmTest, SampleRateChangeTriggersInit) {
-  ChangeTriggersInit(SetSampleRate, apm_.get(), 16000, 8000);
-}
-
-TEST_F(ApmTest, ReverseChannelChangeTriggersInit) {
-  ChangeTriggersInit(SetNumReverseChannels, apm_.get(), 2, 1);
-}
-
-TEST_F(ApmTest, ChannelChangeTriggersInit) {
-  ChangeTriggersInit(SetNumOutputChannels, apm_.get(), 2, 1);
+TEST_F(ApmTest, SampleRatesFloat) {
+  SampleRatesTest(kFloatFormat);
 }
 
 TEST_F(ApmTest, EchoCancellation) {
@@ -841,10 +845,10 @@ TEST_F(ApmTest, EchoCancellationReportsCorrectDelays) {
   // within a valid region (set to +-1.5 blocks). Note that these cases are
   // sampling frequency dependent.
   for (size_t i = 0; i < kProcessSampleRatesSize; i++) {
-    Init(kProcessSampleRates[i], 2, 2, 2, false);
+    Init(kProcessSampleRates[i], kProcessSampleRates[i], 2, 2, 2, false);
     // Sampling frequency dependent variables.
     const int num_ms_per_block = std::max(4,
-                                           640 / frame_->samples_per_channel_);
+                                          640 / frame_->samples_per_channel_);
     const int delay_min_ms = -kLookaheadBlocks * num_ms_per_block;
     const int delay_max_ms = (kMaxDelayBlocks - 1) * num_ms_per_block;
 
@@ -882,16 +886,19 @@ TEST_F(ApmTest, EchoCancellationReportsCorrectDelays) {
 
 TEST_F(ApmTest, EchoControlMobile) {
   // AECM won't use super-wideband.
-  EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(32000));
+  SetFrameSampleRate(frame_, 32000);
+  EXPECT_NOERR(apm_->ProcessStream(frame_));
   EXPECT_EQ(apm_->kBadSampleRateError,
             apm_->echo_control_mobile()->Enable(true));
-  EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(16000));
+  SetFrameSampleRate(frame_, 16000);
+  EXPECT_NOERR(apm_->ProcessStream(frame_));
   EXPECT_EQ(apm_->kNoError,
             apm_->echo_control_mobile()->Enable(true));
-  EXPECT_EQ(apm_->kUnsupportedComponentError, apm_->set_sample_rate_hz(32000));
+  SetFrameSampleRate(frame_, 32000);
+  EXPECT_EQ(apm_->kUnsupportedComponentError, apm_->ProcessStream(frame_));
 
   // Turn AECM on (and AEC off)
-  Init(16000, 2, 2, 2, false);
+  Init(16000, 16000, 2, 2, 2, false);
   EXPECT_EQ(apm_->kNoError, apm_->echo_control_mobile()->Enable(true));
   EXPECT_TRUE(apm_->echo_control_mobile()->is_enabled());
 
@@ -1053,6 +1060,82 @@ TEST_F(ApmTest, GainControl) {
   EXPECT_FALSE(apm_->gain_control()->is_enabled());
 }
 
+void ApmTest::RunQuantizedVolumeDoesNotGetStuckTest(int sample_rate) {
+  Init(sample_rate, sample_rate, 2, 2, 2, false);
+  EXPECT_EQ(apm_->kNoError,
+            apm_->gain_control()->set_mode(GainControl::kAdaptiveAnalog));
+  EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(true));
+
+  int out_analog_level = 0;
+  for (int i = 0; i < 2000; ++i) {
+    ReadFrameWithRewind(near_file_, frame_);
+    // Ensure the audio is at a low level, so the AGC will try to increase it.
+    ScaleFrame(frame_, 0.25);
+
+    // Always pass in the same volume.
+    EXPECT_EQ(apm_->kNoError,
+        apm_->gain_control()->set_stream_analog_level(100));
+    EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
+    out_analog_level = apm_->gain_control()->stream_analog_level();
+  }
+
+  // Ensure the AGC is still able to reach the maximum.
+  EXPECT_EQ(255, out_analog_level);
+}
+
+// Verifies that despite volume slider quantization, the AGC can continue to
+// increase its volume.
+TEST_F(ApmTest, QuantizedVolumeDoesNotGetStuck) {
+  for (size_t i = 0; i < kSampleRatesSize; ++i) {
+    RunQuantizedVolumeDoesNotGetStuckTest(kSampleRates[i]);
+  }
+}
+
+void ApmTest::RunManualVolumeChangeIsPossibleTest(int sample_rate) {
+  Init(sample_rate, sample_rate, 2, 2, 2, false);
+  EXPECT_EQ(apm_->kNoError,
+            apm_->gain_control()->set_mode(GainControl::kAdaptiveAnalog));
+  EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(true));
+
+  int out_analog_level = 100;
+  for (int i = 0; i < 1000; ++i) {
+    ReadFrameWithRewind(near_file_, frame_);
+    // Ensure the audio is at a low level, so the AGC will try to increase it.
+    ScaleFrame(frame_, 0.25);
+
+    EXPECT_EQ(apm_->kNoError,
+        apm_->gain_control()->set_stream_analog_level(out_analog_level));
+    EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
+    out_analog_level = apm_->gain_control()->stream_analog_level();
+  }
+
+  // Ensure the volume was raised.
+  EXPECT_GT(out_analog_level, 100);
+  int highest_level_reached = out_analog_level;
+  // Simulate a user manual volume change.
+  out_analog_level = 100;
+
+  for (int i = 0; i < 300; ++i) {
+    ReadFrameWithRewind(near_file_, frame_);
+    ScaleFrame(frame_, 0.25);
+
+    EXPECT_EQ(apm_->kNoError,
+        apm_->gain_control()->set_stream_analog_level(out_analog_level));
+    EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
+    out_analog_level = apm_->gain_control()->stream_analog_level();
+    // Check that AGC respected the manually adjusted volume.
+    EXPECT_LT(out_analog_level, highest_level_reached);
+  }
+  // Check that the volume was still raised.
+  EXPECT_GT(out_analog_level, 100);
+}
+
+TEST_F(ApmTest, ManualVolumeChangeIsPossible) {
+  for (size_t i = 0; i < kSampleRatesSize; ++i) {
+    RunManualVolumeChangeIsPossibleTest(kSampleRates[i]);
+  }
+}
+
 TEST_F(ApmTest, NoiseSuppression) {
   // Test valid suppression levels.
   NoiseSuppression::Level level[] = {
@@ -1094,7 +1177,6 @@ TEST_F(ApmTest, LevelEstimator) {
 
   // Run this test in wideband; in super-wb, the splitting filter distorts the
   // audio enough to cause deviation from the expectation for small values.
-  EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(16000));
   frame_->samples_per_channel_ = 160;
   frame_->num_channels_ = 2;
   frame_->sample_rate_hz_ = 16000;
@@ -1220,19 +1302,6 @@ TEST_F(ApmTest, VoiceDetection) {
   // TODO(bjornv): Add tests for streamed voice; stream_has_voice()
 }
 
-TEST_F(ApmTest, VerifyDownMixing) {
-  for (size_t i = 0; i < kSampleRatesSize; i++) {
-    Init(kSampleRates[i], 2, 2, 1, false);
-    SetFrameTo(frame_, 1000, 2000);
-    AudioFrame mono_frame;
-    mono_frame.samples_per_channel_ = frame_->samples_per_channel_;
-    mono_frame.num_channels_ = 1;
-    SetFrameTo(&mono_frame, 1500);
-    EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
-    EXPECT_TRUE(FrameDataAreEqual(*frame_, mono_frame));
-  }
-}
-
 TEST_F(ApmTest, AllProcessingDisabledByDefault) {
   EXPECT_FALSE(apm_->echo_cancellation()->is_enabled());
   EXPECT_FALSE(apm_->echo_control_mobile()->is_enabled());
@@ -1245,7 +1314,7 @@ TEST_F(ApmTest, AllProcessingDisabledByDefault) {
 
 TEST_F(ApmTest, NoProcessingWhenAllComponentsDisabled) {
   for (size_t i = 0; i < kSampleRatesSize; i++) {
-    Init(kSampleRates[i], 2, 2, 2, false);
+    Init(kSampleRates[i], kSampleRates[i], 2, 2, 2, false);
     SetFrameTo(frame_, 1000, 2000);
     AudioFrame frame_copy;
     frame_copy.CopyFrom(*frame_);
@@ -1260,17 +1329,15 @@ TEST_F(ApmTest, IdenticalInputChannelsResultInIdenticalOutputChannels) {
   EnableAllComponents();
 
   for (size_t i = 0; i < kProcessSampleRatesSize; i++) {
-    Init(kProcessSampleRates[i], 2, 2, 2, false);
+    Init(kProcessSampleRates[i], kProcessSampleRates[i], 2, 2, 2, false);
     int analog_level = 127;
     EXPECT_EQ(0, feof(far_file_));
     EXPECT_EQ(0, feof(near_file_));
-    while (1) {
-      if (!ReadFrame(far_file_, revframe_)) break;
+    while (ReadFrame(far_file_, revframe_) && ReadFrame(near_file_, frame_)) {
       CopyLeftToRightChannel(revframe_->data_, revframe_->samples_per_channel_);
 
       EXPECT_EQ(apm_->kNoError, apm_->AnalyzeReverseStream(revframe_));
 
-      if (!ReadFrame(near_file_, frame_)) break;
       CopyLeftToRightChannel(frame_->data_, frame_->samples_per_channel_);
       frame_->vad_activity_ = AudioFrame::kVadUnknown;
 
@@ -1328,7 +1395,6 @@ TEST_F(ApmTest, SplittingFilter) {
   EXPECT_EQ(apm_->kNoError, apm_->voice_detection()->Enable(false));
 
   // 5. Not using super-wb.
-  EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(16000));
   frame_->samples_per_channel_ = 160;
   frame_->num_channels_ = 2;
   frame_->sample_rate_hz_ = 16000;
@@ -1349,7 +1415,6 @@ TEST_F(ApmTest, SplittingFilter) {
 
   // Check the test is valid. We should have distortion from the filter
   // when AEC is enabled (which won't affect the audio).
-  EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(32000));
   frame_->samples_per_channel_ = 320;
   frame_->num_channels_ = 2;
   frame_->sample_rate_hz_ = 32000;
@@ -1361,18 +1426,152 @@ TEST_F(ApmTest, SplittingFilter) {
   EXPECT_FALSE(FrameDataAreEqual(*frame_, frame_copy));
 }
 
+#ifdef WEBRTC_AUDIOPROC_DEBUG_DUMP
+void ApmTest::ProcessDebugDump(const std::string& in_filename,
+                               const std::string& out_filename,
+                               Format format) {
+  FILE* in_file = fopen(in_filename.c_str(), "rb");
+  ASSERT_TRUE(in_file != NULL);
+  audioproc::Event event_msg;
+  bool first_init = true;
+
+  while (ReadMessageFromFile(in_file, &event_msg)) {
+    if (event_msg.type() == audioproc::Event::INIT) {
+      const audioproc::Init msg = event_msg.init();
+      int reverse_sample_rate = msg.sample_rate();
+      if (msg.has_reverse_sample_rate()) {
+        reverse_sample_rate = msg.reverse_sample_rate();
+      }
+      Init(msg.sample_rate(),
+           reverse_sample_rate,
+           msg.num_input_channels(),
+           msg.num_output_channels(),
+           msg.num_reverse_channels(),
+           false);
+      if (first_init) {
+        // StartDebugRecording() writes an additional init message. Don't start
+        // recording until after the first init to avoid the extra message.
+        EXPECT_NOERR(apm_->StartDebugRecording(out_filename.c_str()));
+        first_init = false;
+      }
+
+    } else if (event_msg.type() == audioproc::Event::REVERSE_STREAM) {
+      const audioproc::ReverseStream msg = event_msg.reverse_stream();
+
+      if (msg.channel_size() > 0) {
+        ASSERT_EQ(revframe_->num_channels_, msg.channel_size());
+        for (int i = 0; i < msg.channel_size(); ++i) {
+           memcpy(revfloat_cb_->channel(i), msg.channel(i).data(),
+                  msg.channel(i).size());
+        }
+      } else {
+        memcpy(revframe_->data_, msg.data().data(), msg.data().size());
+        if (format == kFloatFormat) {
+          // We're using an int16 input file; convert to float.
+          ConvertToFloat(*revframe_, revfloat_cb_.get());
+        }
+      }
+      AnalyzeReverseStreamChooser(format);
+
+    } else if (event_msg.type() == audioproc::Event::STREAM) {
+      const audioproc::Stream msg = event_msg.stream();
+      // ProcessStream could have changed this for the output frame.
+      frame_->num_channels_ = apm_->num_input_channels();
+
+      EXPECT_NOERR(apm_->gain_control()->set_stream_analog_level(msg.level()));
+      EXPECT_NOERR(apm_->set_stream_delay_ms(msg.delay()));
+      apm_->echo_cancellation()->set_stream_drift_samples(msg.drift());
+      if (msg.has_keypress()) {
+        apm_->set_stream_key_pressed(msg.keypress());
+      } else {
+        apm_->set_stream_key_pressed(true);
+      }
+
+      if (msg.input_channel_size() > 0) {
+        ASSERT_EQ(frame_->num_channels_, msg.input_channel_size());
+        for (int i = 0; i < msg.input_channel_size(); ++i) {
+           memcpy(float_cb_->channel(i), msg.input_channel(i).data(),
+                  msg.input_channel(i).size());
+        }
+      } else {
+        memcpy(frame_->data_, msg.input_data().data(), msg.input_data().size());
+        if (format == kFloatFormat) {
+          // We're using an int16 input file; convert to float.
+          ConvertToFloat(*frame_, float_cb_.get());
+        }
+      }
+      ProcessStreamChooser(format);
+    }
+  }
+  EXPECT_NOERR(apm_->StopDebugRecording());
+  fclose(in_file);
+}
+
+void ApmTest::VerifyDebugDumpTest(Format format) {
+  const std::string in_filename = test::ResourcePath("ref03", "aecdump");
+  std::string format_string;
+  switch (format) {
+    case kIntFormat:
+      format_string = "_int";
+      break;
+    case kFloatFormat:
+      format_string = "_float";
+      break;
+  }
+  const std::string ref_filename =
+      test::OutputPath() + "ref" + format_string + ".aecdump";
+  const std::string out_filename =
+      test::OutputPath() + "out" + format_string + ".aecdump";
+  EnableAllComponents();
+  ProcessDebugDump(in_filename, ref_filename, format);
+  ProcessDebugDump(ref_filename, out_filename, format);
+
+  FILE* ref_file = fopen(ref_filename.c_str(), "rb");
+  FILE* out_file = fopen(out_filename.c_str(), "rb");
+  ASSERT_TRUE(ref_file != NULL);
+  ASSERT_TRUE(out_file != NULL);
+  scoped_ptr<uint8_t[]> ref_bytes;
+  scoped_ptr<uint8_t[]> out_bytes;
+
+  size_t ref_size = ReadMessageBytesFromFile(ref_file, &ref_bytes);
+  size_t out_size = ReadMessageBytesFromFile(out_file, &out_bytes);
+  size_t bytes_read = 0;
+  while (ref_size > 0 && out_size > 0) {
+    bytes_read += ref_size;
+    EXPECT_EQ(ref_size, out_size);
+    EXPECT_EQ(0, memcmp(ref_bytes.get(), out_bytes.get(), ref_size));
+    ref_size = ReadMessageBytesFromFile(ref_file, &ref_bytes);
+    out_size = ReadMessageBytesFromFile(out_file, &out_bytes);
+  }
+  EXPECT_GT(bytes_read, 0u);
+  EXPECT_NE(0, feof(ref_file));
+  EXPECT_NE(0, feof(out_file));
+  ASSERT_EQ(0, fclose(ref_file));
+  ASSERT_EQ(0, fclose(out_file));
+}
+
+TEST_F(ApmTest, VerifyDebugDumpInt) {
+  VerifyDebugDumpTest(kIntFormat);
+}
+
+TEST_F(ApmTest, VerifyDebugDumpFloat) {
+  VerifyDebugDumpTest(kFloatFormat);
+}
+#endif
+
 // TODO(andrew): expand test to verify output.
 TEST_F(ApmTest, DebugDump) {
-  const std::string filename = webrtc::test::OutputPath() + "debug.aec";
-  EXPECT_EQ(apm_->kNullPointerError, apm_->StartDebugRecording(NULL));
+  const std::string filename = test::OutputPath() + "debug.aec";
+  EXPECT_EQ(apm_->kNullPointerError,
+            apm_->StartDebugRecording(static_cast<const char*>(NULL)));
 
 #ifdef WEBRTC_AUDIOPROC_DEBUG_DUMP
   // Stopping without having started should be OK.
   EXPECT_EQ(apm_->kNoError, apm_->StopDebugRecording());
 
   EXPECT_EQ(apm_->kNoError, apm_->StartDebugRecording(filename.c_str()));
-  EXPECT_EQ(apm_->kNoError, apm_->AnalyzeReverseStream(revframe_));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kNoError, apm_->AnalyzeReverseStream(revframe_));
   EXPECT_EQ(apm_->kNoError, apm_->StopDebugRecording());
 
   // Verify the file has been written.
@@ -1392,6 +1591,123 @@ TEST_F(ApmTest, DebugDump) {
 #endif  // WEBRTC_AUDIOPROC_DEBUG_DUMP
 }
 
+// TODO(andrew): expand test to verify output.
+TEST_F(ApmTest, DebugDumpFromFileHandle) {
+  FILE* fid = NULL;
+  EXPECT_EQ(apm_->kNullPointerError, apm_->StartDebugRecording(fid));
+  const std::string filename = test::OutputPath() + "debug.aec";
+  fid = fopen(filename.c_str(), "w");
+  ASSERT_TRUE(fid);
+
+#ifdef WEBRTC_AUDIOPROC_DEBUG_DUMP
+  // Stopping without having started should be OK.
+  EXPECT_EQ(apm_->kNoError, apm_->StopDebugRecording());
+
+  EXPECT_EQ(apm_->kNoError, apm_->StartDebugRecording(fid));
+  EXPECT_EQ(apm_->kNoError, apm_->AnalyzeReverseStream(revframe_));
+  EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
+  EXPECT_EQ(apm_->kNoError, apm_->StopDebugRecording());
+
+  // Verify the file has been written.
+  fid = fopen(filename.c_str(), "r");
+  ASSERT_TRUE(fid != NULL);
+
+  // Clean it up.
+  ASSERT_EQ(0, fclose(fid));
+  ASSERT_EQ(0, remove(filename.c_str()));
+#else
+  EXPECT_EQ(apm_->kUnsupportedFunctionError,
+            apm_->StartDebugRecording(fid));
+  EXPECT_EQ(apm_->kUnsupportedFunctionError, apm_->StopDebugRecording());
+
+  ASSERT_EQ(0, fclose(fid));
+#endif  // WEBRTC_AUDIOPROC_DEBUG_DUMP
+}
+
+TEST_F(ApmTest, FloatAndIntInterfacesGiveIdenticalResults) {
+  audioproc::OutputData ref_data;
+  OpenFileAndReadMessage(ref_filename_, &ref_data);
+
+  Config config;
+  config.Set<ExperimentalAgc>(new ExperimentalAgc(false));
+  scoped_ptr<AudioProcessing> fapm(AudioProcessing::Create(config));
+  EnableAllComponents();
+  EnableAllAPComponents(fapm.get());
+  for (int i = 0; i < ref_data.test_size(); i++) {
+    printf("Running test %d of %d...\n", i + 1, ref_data.test_size());
+
+    audioproc::Test* test = ref_data.mutable_test(i);
+    // TODO(ajm): Restore downmixing test cases.
+    if (test->num_input_channels() != test->num_output_channels())
+      continue;
+
+    const int num_render_channels = test->num_reverse_channels();
+    const int num_input_channels = test->num_input_channels();
+    const int num_output_channels = test->num_output_channels();
+    const int samples_per_channel = test->sample_rate() * kChunkSizeMs / 1000;
+    const int output_length =  samples_per_channel * num_output_channels;
+
+    Init(test->sample_rate(), test->sample_rate(), num_input_channels,
+         num_output_channels, num_render_channels, true);
+    Init(fapm.get());
+
+    ChannelBuffer<int16_t> output_cb(samples_per_channel, num_input_channels);
+    scoped_ptr<int16_t[]> output_int16(new int16_t[output_length]);
+
+    int analog_level = 127;
+    while (ReadFrame(far_file_, revframe_, revfloat_cb_.get()) &&
+           ReadFrame(near_file_, frame_, float_cb_.get())) {
+      frame_->vad_activity_ = AudioFrame::kVadUnknown;
+
+      EXPECT_NOERR(apm_->AnalyzeReverseStream(revframe_));
+      EXPECT_NOERR(fapm->AnalyzeReverseStream(
+          revfloat_cb_->channels(),
+          samples_per_channel,
+          test->sample_rate(),
+          LayoutFromChannels(num_render_channels)));
+
+      EXPECT_NOERR(apm_->set_stream_delay_ms(0));
+      EXPECT_NOERR(fapm->set_stream_delay_ms(0));
+      apm_->echo_cancellation()->set_stream_drift_samples(0);
+      fapm->echo_cancellation()->set_stream_drift_samples(0);
+      EXPECT_NOERR(apm_->gain_control()->set_stream_analog_level(analog_level));
+      EXPECT_NOERR(fapm->gain_control()->set_stream_analog_level(analog_level));
+
+      EXPECT_NOERR(apm_->ProcessStream(frame_));
+      EXPECT_NOERR(fapm->ProcessStream(
+          float_cb_->channels(),
+          samples_per_channel,
+          test->sample_rate(),
+          LayoutFromChannels(num_input_channels),
+          LayoutFromChannels(num_output_channels)));
+
+      // Convert to interleaved int16.
+      ScaleAndRoundToInt16(float_cb_->data(), output_length, output_cb.data());
+      Interleave(output_cb.channels(),
+                 samples_per_channel,
+                 num_output_channels,
+                 output_int16.get());
+      // Verify float and int16 paths produce identical output.
+      EXPECT_EQ(0, memcmp(frame_->data_, output_int16.get(), output_length));
+
+      analog_level = fapm->gain_control()->stream_analog_level();
+      EXPECT_EQ(apm_->gain_control()->stream_analog_level(),
+                fapm->gain_control()->stream_analog_level());
+      EXPECT_EQ(apm_->echo_cancellation()->stream_has_echo(),
+                fapm->echo_cancellation()->stream_has_echo());
+      EXPECT_EQ(apm_->voice_detection()->stream_has_voice(),
+                fapm->voice_detection()->stream_has_voice());
+      EXPECT_EQ(apm_->noise_suppression()->speech_probability(),
+                fapm->noise_suppression()->speech_probability());
+
+      // Reset in case of downmixing.
+      frame_->num_channels_ = test->num_input_channels();
+    }
+    rewind(far_file_);
+    rewind(near_file_);
+  }
+}
+
 // TODO(andrew): Add a test to process a few frames with different combinations
 // of enabled components.
 
@@ -1400,23 +1716,20 @@ TEST_F(ApmTest, DebugDump) {
 #ifdef WEBRTC_AUDIOPROC_BIT_EXACT
 TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
-  webrtc::audioproc::OutputData ref_data;
+  audioproc::OutputData ref_data;
 
   if (!write_ref_data) {
-    ReadMessageLiteFromFile(ref_filename_, &ref_data);
+    OpenFileAndReadMessage(ref_filename_, &ref_data);
   } else {
     // Write the desired tests to the protobuf reference file.
     for (size_t i = 0; i < kChannelsSize; i++) {
       for (size_t j = 0; j < kChannelsSize; j++) {
-        // We can't have more output than input channels.
-        for (size_t k = 0; k <= j; k++) {
-          for (size_t l = 0; l < kProcessSampleRatesSize; l++) {
-            webrtc::audioproc::Test* test = ref_data.add_test();
-            test->set_num_reverse_channels(kChannels[i]);
-            test->set_num_input_channels(kChannels[j]);
-            test->set_num_output_channels(kChannels[k]);
-            test->set_sample_rate(kProcessSampleRates[l]);
-          }
+        for (size_t l = 0; l < kProcessSampleRatesSize; l++) {
+          audioproc::Test* test = ref_data.add_test();
+          test->set_num_reverse_channels(kChannels[i]);
+          test->set_num_input_channels(kChannels[j]);
+          test->set_num_output_channels(kChannels[j]);
+          test->set_sample_rate(kProcessSampleRates[l]);
         }
       }
     }
@@ -1427,9 +1740,14 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
   for (int i = 0; i < ref_data.test_size(); i++) {
     printf("Running test %d of %d...\n", i + 1, ref_data.test_size());
 
-    webrtc::audioproc::Test* test = ref_data.mutable_test(i);
-    Init(test->sample_rate(), test->num_reverse_channels(),
-         test->num_input_channels(), test->num_output_channels(), true);
+    audioproc::Test* test = ref_data.mutable_test(i);
+    // TODO(ajm): We no longer allow different input and output channels. Skip
+    // these tests for now, but they should be removed from the set.
+    if (test->num_input_channels() != test->num_output_channels())
+      continue;
+
+    Init(test->sample_rate(), test->sample_rate(), test->num_input_channels(),
+         test->num_output_channels(), test->num_reverse_channels(), true);
 
     int frame_count = 0;
     int has_echo_count = 0;
@@ -1440,11 +1758,9 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
     int max_output_average = 0;
     float ns_speech_prob_average = 0.0f;
 
-    while (1) {
-      if (!ReadFrame(far_file_, revframe_)) break;
+    while (ReadFrame(far_file_, revframe_) && ReadFrame(near_file_, frame_)) {
       EXPECT_EQ(apm_->kNoError, apm_->AnalyzeReverseStream(revframe_));
 
-      if (!ReadFrame(near_file_, frame_)) break;
       frame_->vad_activity_ = AudioFrame::kVadUnknown;
 
       EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(0));
@@ -1453,6 +1769,7 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
           apm_->gain_control()->set_stream_analog_level(analog_level));
 
       EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
+
       // Ensure the frame was downmixed properly.
       EXPECT_EQ(test->num_output_channels(), frame_->num_channels_);
 
@@ -1514,8 +1831,7 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
       EXPECT_EQ(test->max_output_average(), max_output_average);
 
 #if defined(WEBRTC_AUDIOPROC_FLOAT_PROFILE)
-      webrtc::audioproc::Test::EchoMetrics reference =
-          test->echo_metrics();
+      audioproc::Test::EchoMetrics reference = test->echo_metrics();
       TestStats(echo_metrics.residual_echo_return_loss,
                 reference.residual_echo_return_loss());
       TestStats(echo_metrics.echo_return_loss,
@@ -1525,8 +1841,7 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
       TestStats(echo_metrics.a_nlp,
                 reference.a_nlp());
 
-      webrtc::audioproc::Test::DelayMetrics reference_delay =
-          test->delay_metrics();
+      audioproc::Test::DelayMetrics reference_delay = test->delay_metrics();
       EXPECT_EQ(reference_delay.median(), median);
       EXPECT_EQ(reference_delay.std(), std);
 
@@ -1544,8 +1859,7 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
       test->set_max_output_average(max_output_average);
 
 #if defined(WEBRTC_AUDIOPROC_FLOAT_PROFILE)
-      webrtc::audioproc::Test::EchoMetrics* message =
-          test->mutable_echo_metrics();
+      audioproc::Test::EchoMetrics* message = test->mutable_echo_metrics();
       WriteStatsMessage(echo_metrics.residual_echo_return_loss,
                         message->mutable_residual_echo_return_loss());
       WriteStatsMessage(echo_metrics.echo_return_loss,
@@ -1555,7 +1869,7 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
       WriteStatsMessage(echo_metrics.a_nlp,
                         message->mutable_a_nlp());
 
-      webrtc::audioproc::Test::DelayMetrics* message_delay =
+      audioproc::Test::DelayMetrics* message_delay =
           test->mutable_delay_metrics();
       message_delay->set_median(median);
       message_delay->set_std(std);
@@ -1573,7 +1887,7 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
   }
 
   if (write_ref_data) {
-    WriteMessageLiteToFile(ref_filename_, ref_data);
+    OpenFileAndWriteMessage(ref_filename_, ref_data);
   }
 }
 #endif  // WEBRTC_AUDIOPROC_BIT_EXACT
@@ -1583,3 +1897,4 @@ TEST_F(ApmTest, DISABLED_ON_ANDROID(Process)) {
 //                https://code.google.com/p/webrtc/issues/detail?id=1981
 
 }  // namespace
+}  // namespace webrtc

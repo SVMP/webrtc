@@ -95,10 +95,10 @@ var sdpConstraints = {'mandatory': {
 refreshSources();
 
 function refreshSources() {
-  if (webrtcDetectedVersion >= 30) {
+  if (webrtcDetectedBrowser === 'chrome' && webrtcDetectedVersion >= 30) {
     MediaStreamTrack.getSources(gotSources);
   } else {
-    alert('Make sure that you have Chrome M30 to test device enumeration api.');
+    alert('Failed to enumerate devices, you need Chrome version 30 or higher');
   }
 }
 
@@ -197,16 +197,42 @@ function createPC() {
   trace("Adding Local Stream to peer connection");
 }
 
+function onSetSessionDescriptionSuccess() {
+  trace('Set session description success.');
+}
+
+function onSetSessionDescriptionError(error) {
+  trace('Failed to set session description: ' + error.toString());
+}
+
+// Workaround for crbug/322756.
+function maybeAddLineBreakToEnd(sdp) {
+  var endWithLineBreak = new RegExp(/\n$/);
+  if (!endWithLineBreak.test(sdp)) {
+    return sdp + '\n';
+  }
+  return sdp;
+}
+
 function createOffer(){
-  pc1.createOffer(gotDescription1,null,null);
+  pc1.createOffer(gotDescription1, onCreateSessionDescriptionError);
+}
+
+function onCreateSessionDescriptionError(error) {
+  trace('Failed to create session description: ' + error.toString());
 }
 
 function setOffer(){
   var sdp = document.getElementById("offerSdp").value;
+  sdp = maybeAddLineBreakToEnd(sdp);
   var offer = new RTCSessionDescription({type:'offer',sdp:sdp});
-  pc1.setLocalDescription(offer);
+  pc1.setLocalDescription(offer,
+                          onSetSessionDescriptionSuccess,
+                          onSetSessionDescriptionError);
   trace("Modified Offer from pc1 \n" + sdp);
-  pc2.setRemoteDescription(offer);
+  pc2.setRemoteDescription(offer,
+                           onSetSessionDescriptionSuccess,
+                           onSetSessionDescriptionError);
 }
 
 function gotDescription1(desc) {
@@ -218,15 +244,21 @@ function createAnswer(){
   // Since the "remote" side has no media stream we need
   // to pass in the right constraints in order for it to
   // accept the incoming offer of audio and video.
-  pc2.createAnswer(gotDescription2, null, sdpConstraints);
+  pc2.createAnswer(gotDescription2, onCreateSessionDescriptionError,
+                   sdpConstraints);
 }
 
 function setAnswer(){
   var sdp = document.getElementById("answerSdp").value;
+  sdp = maybeAddLineBreakToEnd(sdp);
   var answer = new RTCSessionDescription({type:'answer',sdp:sdp});
-  pc2.setLocalDescription(answer);
+  pc2.setLocalDescription(answer,
+                          onSetSessionDescriptionSuccess,
+                          onSetSessionDescriptionError);
   trace("Modified Answer from pc2 \n" + sdp);
-  pc1.setRemoteDescription(answer);
+  pc1.setRemoteDescription(answer,
+                           onSetSessionDescriptionSuccess,
+                           onSetSessionDescriptionError);
 }
 
 function gotDescription2(desc) {
@@ -262,16 +294,26 @@ function gotRemoteStream(e) {
 
 function iceCallback1(event) {
   if (event.candidate) {
-    pc2.addIceCandidate(new RTCIceCandidate(event.candidate));
+    pc2.addIceCandidate(new RTCIceCandidate(event.candidate),
+                        onAddIceCandidateSuccess, onAddIceCandidateError);
     trace("Local ICE candidate: \n" + event.candidate.candidate);
   }
 }
 
 function iceCallback2(event) {
   if (event.candidate) {
-    pc1.addIceCandidate(new RTCIceCandidate(event.candidate));
+    pc1.addIceCandidate(new RTCIceCandidate(event.candidate),
+                        onAddIceCandidateSuccess, onAddIceCandidateError);
     trace("Remote ICE candidate: \n " + event.candidate.candidate);
   }
+}
+
+function onAddIceCandidateSuccess() {
+  trace("AddIceCandidate success.");
+}
+
+function onAddIceCandidateError(error) {
+  trace("Failed to add Ice Candidate: " + error.toString());
 }
 </script>
 </body>

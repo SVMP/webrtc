@@ -14,26 +14,25 @@
       'target_name': 'webrtc_test_common',
       'type': 'static_library',
       'sources': [
+        'configurable_frame_size_encoder.cc',
+        'configurable_frame_size_encoder.h',
         'direct_transport.cc',
         'direct_transport.h',
+        'encoder_settings.cc',
+        'encoder_settings.h',
+        'fake_audio_device.cc',
+        'fake_audio_device.h',
         'fake_decoder.cc',
         'fake_decoder.h',
         'fake_encoder.cc',
         'fake_encoder.h',
+        'fake_network_pipe.cc',
+        'fake_network_pipe.h',
         'flags.cc',
         'flags.h',
         'frame_generator_capturer.cc',
         'frame_generator_capturer.h',
-        'generate_ssrcs.cc',
-        'generate_ssrcs.h',
-        'gl/gl_renderer.cc',
-        'gl/gl_renderer.h',
-        'linux/glx_renderer.cc',
-        'linux/glx_renderer.h',
-        'linux/video_renderer_linux.cc',
-        'mac/run_tests.mm',
-        'mac/video_renderer_mac.h',
-        'mac/video_renderer_mac.mm',
+        'mock_transport.h',
         'null_platform_renderer.cc',
         'null_transport.cc',
         'null_transport.h',
@@ -50,35 +49,10 @@
         'video_capturer.h',
         'video_renderer.cc',
         'video_renderer.h',
-        'win/d3d_renderer.cc',
-        'win/d3d_renderer.h',
-        'win/run_loop_win.cc',
       ],
-      'conditions': [
-        ['OS=="linux"', {
-          'sources!': [
-            'null_platform_renderer.cc',
-          ],
-        }],
-        ['OS=="mac"', {
-          'sources!': [
-            'null_platform_renderer.cc',
-            'run_tests.cc',
-          ],
-        }],
-        ['OS!="linux" and OS!="mac"', {
-          'sources!' : [
-            'gl/gl_renderer.cc',
-            'gl/gl_renderer.h',
-          ],
-        }],
-        ['OS=="win"', {
-          'sources!': [
-            'null_platform_renderer.cc',
-            'run_loop.cc',
-          ],
-        }],
-      ],
+      # TODO(pbos): As far as I can tell these are dependencies from
+      # video_render and they should really not be here. This target provides
+      # no platform-specific rendering.
       'direct_dependent_settings': {
         'conditions': [
           ['OS=="linux"', {
@@ -88,9 +62,6 @@
               '-lGL',
             ],
           }],
-          #TODO(pbos) : These dependencies should not have to be here, they
-          #             aren't used by test code directly, only by components
-          #             used by the tests.
           ['OS=="android"', {
             'libraries' : [
               '-lGLESv2', '-llog',
@@ -115,9 +86,29 @@
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
         '<(webrtc_root)/modules/modules.gyp:video_capture_module',
+        '<(webrtc_root)/modules/modules.gyp:media_file',
+        '<(webrtc_root)/test/test.gyp:frame_generator',
         '<(webrtc_root)/test/test.gyp:test_support',
-        '<(webrtc_root)/common_video/common_video.gyp:frame_generator',
       ],
     },
   ],
+  'conditions': [
+    ['include_tests==1', {
+      'targets': [
+        {
+          'target_name': 'webrtc_test_common_unittests',
+          'type': '<(gtest_target_type)',
+          'dependencies': [
+            'webrtc_test_common',
+            '<(DEPTH)/testing/gtest.gyp:gtest',
+            '<(DEPTH)/testing/gmock.gyp:gmock',
+            '<(webrtc_root)/test/test.gyp:test_support_main',
+          ],
+          'sources': [
+            'fake_network_pipe_unittest.cc',
+          ],
+        },
+      ],  #targets
+    }],  # include_tests
+  ],  # conditions
 }

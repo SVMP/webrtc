@@ -56,7 +56,6 @@ const uint32 MSG_SEQUENCEOBJECTS_CREATED = 6;
 const uint32 MSG_CONFIG_STOP = 7;
 
 const uint32 ALLOCATE_DELAY = 250;
-const uint32 ALLOCATION_STEP_DELAY = 1 * 1000;
 
 const int PHASE_UDP = 0;
 const int PHASE_RELAY = 1;
@@ -64,10 +63,6 @@ const int PHASE_TCP = 2;
 const int PHASE_SSLTCP = 3;
 
 const int kNumPhases = 4;
-
-// Both these values are in bytes.
-const int kLargeSocketSendBufferSize = 128 * 1024;
-const int kNormalSocketSendBufferSize = 64 * 1024;
 
 const int SHAKE_MIN_DELAY = 45 * 1000;  // 45 seconds
 const int SHAKE_MAX_DELAY = 90 * 1000;  // 90 seconds
@@ -149,7 +144,9 @@ class AllocationSequence : public talk_base::MessageHandler,
 
   void OnReadPacket(talk_base::AsyncPacketSocket* socket,
                     const char* data, size_t size,
-                    const talk_base::SocketAddress& remote_addr);
+                    const talk_base::SocketAddress& remote_addr,
+                    const talk_base::PacketTime& packet_time);
+
   void OnPortDestroyed(PortInterface* port);
 
   BasicPortAllocatorSession* session_;
@@ -240,7 +237,6 @@ BasicPortAllocatorSession::BasicPortAllocatorSession(
                            ice_ufrag, ice_pwd, allocator->flags()),
       allocator_(allocator), network_thread_(NULL),
       socket_factory_(allocator->socket_factory()),
-      configuration_done_(false),
       allocation_started_(false),
       network_manager_started_(false),
       running_(false),
@@ -488,16 +484,6 @@ void BasicPortAllocatorSession::AddAllocatedPort(Port* port,
   port->set_send_retransmit_count_attribute((allocator_->flags() &
       PORTALLOCATOR_ENABLE_STUN_RETRANSMIT_ATTRIBUTE) != 0);
 
-  if (content_name().compare(CN_VIDEO) == 0 &&
-      component_ == cricket::ICE_CANDIDATE_COMPONENT_RTP) {
-    // For video RTP alone, we set send-buffer sizes. This used to be set in the
-    // engines/channels.
-    int sendBufSize = (flags() & PORTALLOCATOR_USE_LARGE_SOCKET_SEND_BUFFERS)
-                      ? kLargeSocketSendBufferSize
-                      : kNormalSocketSendBufferSize;
-    port->SetOption(talk_base::Socket::OPT_SNDBUF, sendBufSize);
-  }
-
   PortData data(port, seq);
   ports_.push_back(data);
 
@@ -513,8 +499,6 @@ void BasicPortAllocatorSession::AddAllocatedPort(Port* port,
 
   if (prepare_address)
     port->PrepareAddress();
-  if (running_)
-    port->Start();
 }
 
 void BasicPortAllocatorSession::OnAllocationSequenceObjectsCreated() {
@@ -857,7 +841,8 @@ void AllocationSequence::CreateUDPPorts() {
   // is enabled completely.
   UDPPort* port = NULL;
   if (IsFlagSet(PORTALLOCATOR_ENABLE_SHARED_SOCKET) && udp_socket_) {
-    port = UDPPort::Create(session_->network_thread(), network_,
+    port = UDPPort::Create(session_->network_thread(),
+                           session_->socket_factory(), network_,
                            udp_socket_.get(),
                            session_->username(), session_->password());
   } else {
@@ -1023,13 +1008,15 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config) {
 
 void AllocationSequence::OnReadPacket(
     talk_base::AsyncPacketSocket* socket, const char* data, size_t size,
-    const talk_base::SocketAddress& remote_addr) {
+    const talk_base::SocketAddress& remote_addr,
+    const talk_base::PacketTime& packet_time) {
   ASSERT(socket == udp_socket_.get());
   for (std::deque<Port*>::iterator iter = ports.begin();
        iter != ports.end(); ++iter) {
     // We have only one port in the queue.
     // TODO(mallinath) - Add shared socket support to Relay and Turn ports.
-    if ((*iter)->HandleIncomingPacket(socket, data, size, remote_addr)) {
+    if ((*iter)->HandleIncomingPacket(
+        socket, data, size, remote_addr, packet_time)) {
       break;
     }
   }

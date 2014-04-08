@@ -33,35 +33,6 @@ namespace webrtc
 //                              Static Methods
 // ============================================================================
 
-bool AudioDeviceLinuxPulse::PulseAudioIsSupported()
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceAudioDevice, -1, "%s",
-                 __FUNCTION__);
-
-    bool pulseAudioIsSupported(true);
-
-    // Check that we can initialize
-    AudioDeviceLinuxPulse* admPulse = new AudioDeviceLinuxPulse(-1);
-    if (admPulse->InitPulseAudio() == -1)
-    {
-        pulseAudioIsSupported = false;
-    }
-    admPulse->TerminatePulseAudio();
-    delete admPulse;
-
-    if (pulseAudioIsSupported)
-    {
-        WEBRTC_TRACE(kTraceStateInfo, kTraceAudioDevice, -1,
-                     "*** Linux Pulse Audio is supported ***");
-    } else
-    {
-        WEBRTC_TRACE(kTraceStateInfo, kTraceAudioDevice, -1,
-                     "*** Linux Pulse Audio is NOT supported => will revert to the ALSA API ***");
-    }
-
-    return (pulseAudioIsSupported);
-}
-
 AudioDeviceLinuxPulse::AudioDeviceLinuxPulse(const int32_t id) :
     _ptrAudioBuffer(NULL),
     _critSect(*CriticalSectionWrapper::CreateCriticalSection()),
@@ -370,34 +341,6 @@ bool AudioDeviceLinuxPulse::Initialized() const
     return (_initialized);
 }
 
-int32_t AudioDeviceLinuxPulse::SpeakerIsAvailable(bool& available)
-{
-
-    bool wasInitialized = _mixerManager.SpeakerIsInitialized();
-
-    // Make an attempt to open up the
-    // output mixer corresponding to the currently selected output device.
-    //
-    if (!wasInitialized && InitSpeaker() == -1)
-    {
-        available = false;
-        return 0;
-    }
-
-    // Given that InitSpeaker was successful, we know that a valid speaker exists
-    //
-    available = true;
-
-    // Close the initialized output mixer
-    //
-    if (!wasInitialized)
-    {
-        _mixerManager.CloseSpeaker();
-    }
-
-    return 0;
-}
-
 int32_t AudioDeviceLinuxPulse::InitSpeaker()
 {
 
@@ -439,34 +382,6 @@ int32_t AudioDeviceLinuxPulse::InitSpeaker()
     // clear _deviceIndex
     _deviceIndex = -1;
     _paDeviceIndex = -1;
-
-    return 0;
-}
-
-int32_t AudioDeviceLinuxPulse::MicrophoneIsAvailable(bool& available)
-{
-
-    bool wasInitialized = _mixerManager.MicrophoneIsInitialized();
-
-    // Make an attempt to open up the
-    // input mixer corresponding to the currently selected output device.
-    //
-    if (!wasInitialized && InitMicrophone() == -1)
-    {
-        available = false;
-        return 0;
-    }
-
-    // Given that InitMicrophone was successful, we know that a valid microphone
-    // exists
-    available = true;
-
-    // Close the initialized input mixer
-    //
-    if (!wasInitialized)
-    {
-        _mixerManager.CloseMicrophone();
-    }
 
     return 0;
 }
@@ -2642,7 +2557,7 @@ int32_t AudioDeviceLinuxPulse::ReadRecordedData(const void* bufferData,
 int32_t AudioDeviceLinuxPulse::ProcessRecordedData(
     int8_t *bufferData,
     uint32_t bufferSizeInSamples,
-    uint32_t recDelay)
+    uint32_t recDelay) EXCLUSIVE_LOCKS_REQUIRED(_critSect)
 {
     uint32_t currentMicLevel(0);
     uint32_t newMicLevel(0);

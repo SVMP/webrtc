@@ -47,6 +47,7 @@ class RtpReceiver;
 class RTPReceiverAudio;
 class RtpRtcp;
 class TelephoneEventHandler;
+class ViENetwork;
 class VoEMediaProcess;
 class VoERTCPObserver;
 class VoERTPObserver;
@@ -59,9 +60,95 @@ struct SenderInfo;
 namespace voe {
 
 class Statistics;
+class StatisticsProxy;
 class TransmitMixer;
 class OutputMixer;
 
+// Helper class to simplify locking scheme for members that are accessed from
+// multiple threads.
+// Example: a member can be set on thread T1 and read by an internal audio
+// thread T2. Accessing the member via this class ensures that we are
+// safe and also avoid TSan v2 warnings.
+class ChannelState {
+ public:
+    struct State {
+        State() : rx_apm_is_enabled(false),
+                  input_external_media(false),
+                  output_is_on_hold(false),
+                  output_file_playing(false),
+                  input_file_playing(false),
+                  playing(false),
+                  sending(false),
+                  receiving(false) {}
+
+        bool rx_apm_is_enabled;
+        bool input_external_media;
+        bool output_is_on_hold;
+        bool output_file_playing;
+        bool input_file_playing;
+        bool playing;
+        bool sending;
+        bool receiving;
+    };
+
+    ChannelState() : lock_(CriticalSectionWrapper::CreateCriticalSection()) {
+    }
+    virtual ~ChannelState() {}
+
+    void Reset() {
+        CriticalSectionScoped lock(lock_.get());
+        state_ = State();
+    }
+
+    State Get() const {
+        CriticalSectionScoped lock(lock_.get());
+        return state_;
+    }
+
+    void SetRxApmIsEnabled(bool enable) {
+        CriticalSectionScoped lock(lock_.get());
+        state_.rx_apm_is_enabled = enable;
+    }
+
+    void SetInputExternalMedia(bool enable) {
+        CriticalSectionScoped lock(lock_.get());
+        state_.input_external_media = enable;
+    }
+
+    void SetOutputIsOnHold(bool enable) {
+        CriticalSectionScoped lock(lock_.get());
+        state_.output_is_on_hold = enable;
+    }
+
+    void SetOutputFilePlaying(bool enable) {
+        CriticalSectionScoped lock(lock_.get());
+        state_.output_file_playing = enable;
+    }
+
+    void SetInputFilePlaying(bool enable) {
+        CriticalSectionScoped lock(lock_.get());
+        state_.input_file_playing = enable;
+    }
+
+    void SetPlaying(bool enable) {
+        CriticalSectionScoped lock(lock_.get());
+        state_.playing = enable;
+    }
+
+    void SetSending(bool enable) {
+        CriticalSectionScoped lock(lock_.get());
+        state_.sending = enable;
+    }
+
+    void SetReceiving(bool enable) {
+        CriticalSectionScoped lock(lock_.get());
+        state_.receiving = enable;
+    }
+
+private:
+    scoped_ptr<CriticalSectionWrapper> lock_;
+    State state_;
+};
 
 class Channel:
     public RtpData,
@@ -136,7 +223,8 @@ public:
     // VoENetwork
     int32_t RegisterExternalTransport(Transport& transport);
     int32_t DeRegisterExternalTransport();
-    int32_t ReceivedRTPPacket(const int8_t* data, int32_t length);
+    int32_t ReceivedRTPPacket(const int8_t* data, int32_t length,
+                              const PacketTime& packet_time);
     int32_t ReceivedRTCPPacket(const int8_t* data, int32_t length);
 
     // VoEFile
@@ -201,6 +289,7 @@ public:
 
     // VoENetEqStats
     int GetNetworkStatistics(NetworkStatistics& stats);
+    void GetDecodingCallStatistics(AudioDecodingCallStats* stats) const;
 
     // VoEVideoSync
     bool GetDelayEstimate(int* jitter_buffer_delay_ms,
@@ -215,10 +304,6 @@ public:
 
     // VoEVideoSyncExtended
     int GetRtpRtcp(RtpRtcp** rtpRtcpModule, RtpReceiver** rtp_receiver) const;
-
-    // VoEEncryption
-    int RegisterExternalEncryption(Encryption& encryption);
-    int DeRegisterExternalEncryption();
 
     // VoEDtmf
     int SendTelephoneEventOutband(unsigned char eventCode, int lengthMs,
@@ -255,8 +340,9 @@ public:
     int GetLocalSSRC(unsigned int& ssrc);
     int GetRemoteSSRC(unsigned int& ssrc);
     int GetRemoteCSRCs(unsigned int arrCSRC[15]);
-    int SetRTPAudioLevelIndicationStatus(bool enable, unsigned char ID);
-    int GetRTPAudioLevelIndicationStatus(bool& enable, unsigned char& ID);
+    int SetSendAudioLevelIndicationStatus(bool enable, unsigned char id);
+    int SetSendAbsoluteSenderTimeStatus(bool enable, unsigned char id);
+    int SetReceiveAbsoluteSenderTimeStatus(bool enable, unsigned char id);
     int SetRTCPStatus(bool enable);
     int GetRTCPStatus(bool& enabled);
     int SetRTCP_CNAME(const char cName[256]);
@@ -281,10 +367,9 @@ public:
     int StartRTPDump(const char fileNameUTF8[1024], RTPDirections direction);
     int StopRTPDump(RTPDirections direction);
     bool RTPDumpIsActive(RTPDirections direction);
-    int InsertExtraRTPPacket(unsigned char payloadType, bool markerBit,
-                             const char* payloadData,
-                             unsigned short payloadSize);
     uint32_t LastRemoteTimeStamp() { return _lastRemoteTimeStamp; }
+    // Takes ownership of the ViENetwork.
+    void SetVideoEngineBWETarget(ViENetwork* vie_network, int video_channel);
 
     // From AudioPacketizationCallback in the ACM
     int32_t SendData(FrameType frameType,
@@ -375,31 +460,24 @@ public:
     }
     bool Playing() const
     {
-        return _playing;
+        return channel_state_.Get().playing;
     }
     bool Sending() const
     {
-        // A lock is needed because |_sending| is accessed by both
-        // TransmitMixer::PrepareDemux() and StartSend()/StopSend(), which
-        // are called by different threads.
-        CriticalSectionScoped cs(&_callbackCritSect);
-        return _sending;
+        return channel_state_.Get().sending;
     }
     bool Receiving() const
     {
-        return _receiving;
+        return channel_state_.Get().receiving;
     }
     bool ExternalTransport() const
     {
+        CriticalSectionScoped cs(&_callbackCritSect);
         return _externalTransport;
     }
     bool ExternalMixing() const
     {
         return _externalMixing;
-    }
-    bool OutputIsOnHold() const
-    {
-        return _outputIsOnHold;
     }
     bool InputIsOnHold() const
     {
@@ -431,7 +509,7 @@ private:
                              int packet_length,
                              const RTPHeader& header);
     bool IsPacketInOrder(const RTPHeader& header) const;
-    bool IsPacketRetransmitted(const RTPHeader& header) const;
+    bool IsPacketRetransmitted(const RTPHeader& header, bool in_order) const;
     int ResendPackets(const uint16_t* sequence_numbers, int length);
     int InsertInbandDtmfTone();
     int32_t MixOrReplaceAudioWithFile(int mixingFrequency);
@@ -441,9 +519,10 @@ private:
     void UpdatePacketDelay(uint32_t timestamp,
                            uint16_t sequenceNumber);
     void RegisterReceiveCodecsToRTPModule();
-    int ApmProcessRx(AudioFrame& audioFrame);
 
     int SetRedPayloadType(int red_payload_type);
+    int SetSendRtpHeaderExtension(bool enable, RTPExtensionType type,
+                                  unsigned char id);
 
     CriticalSectionWrapper& _fileCritSect;
     CriticalSectionWrapper& _callbackCritSect;
@@ -451,9 +530,12 @@ private:
     uint32_t _instanceId;
     int32_t _channelId;
 
+    ChannelState channel_state_;
+
     scoped_ptr<RtpHeaderParser> rtp_header_parser_;
     scoped_ptr<RTPPayloadRegistry> rtp_payload_registry_;
     scoped_ptr<ReceiveStatistics> rtp_receive_statistics_;
+    scoped_ptr<StatisticsProxy> statistics_proxy_;
     scoped_ptr<RtpReceiver> rtp_receiver_;
     TelephoneEventHandler* telephone_event_handler_;
     scoped_ptr<RtpRtcp> _rtpRtcpModule;
@@ -463,7 +545,7 @@ private:
     AudioLevel _outputAudioLevel;
     bool _externalTransport;
     AudioFrame _audioFrame;
-    scoped_array<int16_t> mono_recording_audio_;
+    scoped_ptr<int16_t[]> mono_recording_audio_;
     // Resampler is used when input data is stereo while codec is mono.
     PushResampler input_resampler_;
     uint8_t _audioLevel_dBov;
@@ -473,21 +555,17 @@ private:
     int _inputFilePlayerId;
     int _outputFilePlayerId;
     int _outputFileRecorderId;
-    bool _inputFilePlaying;
-    bool _outputFilePlaying;
     bool _outputFileRecording;
     DtmfInbandQueue _inbandDtmfQueue;
     DtmfInband _inbandDtmfGenerator;
-    bool _inputExternalMedia;
     bool _outputExternalMedia;
     VoEMediaProcess* _inputExternalMediaCallbackPtr;
     VoEMediaProcess* _outputExternalMediaCallbackPtr;
-    uint8_t* _encryptionRTPBufferPtr;
-    uint8_t* _decryptionRTPBufferPtr;
-    uint8_t* _encryptionRTCPBufferPtr;
-    uint8_t* _decryptionRTCPBufferPtr;
     uint32_t _timeStamp;
     uint8_t _sendTelephoneEventPayloadType;
+
+    // Timestamp of the audio pulled from NetEq.
+    uint32_t jitter_buffer_playout_timestamp_;
     uint32_t playout_timestamp_rtp_;
     uint32_t playout_timestamp_rtcp_;
     uint32_t playout_delay_ms_;
@@ -504,7 +582,6 @@ private:
     VoiceEngineObserver* _voiceEngineObserverPtr; // owned by base
     CriticalSectionWrapper* _callbackCritSectPtr; // owned by base
     Transport* _transportPtr; // WebRtc socket or external transport
-    Encryption* _encryptionPtr; // WebRtc SRTP or external encryption
     scoped_ptr<AudioProcessing> rtp_audioproc_;
     scoped_ptr<AudioProcessing> rx_audioproc_; // far end AudioProcessing
     VoERxVadCallback* _rxVadObserverPtr;
@@ -513,13 +590,9 @@ private:
     VoERTPObserver* _rtpObserverPtr;
     VoERTCPObserver* _rtcpObserverPtr;
     // VoEBase
-    bool _outputIsOnHold;
     bool _externalPlayout;
     bool _externalMixing;
     bool _inputIsOnHold;
-    bool _playing;
-    bool _sending;
-    bool _receiving;
     bool _mixFileWithMicrophone;
     bool _rtpObserver;
     bool _rtcpObserver;
@@ -528,16 +601,10 @@ private:
     float _panLeft;
     float _panRight;
     float _outputGain;
-    // VoEEncryption
-    bool _encrypting;
-    bool _decrypting;
     // VoEDtmf
     bool _playOutbandDtmfEvent;
     bool _playInbandDtmfEvent;
     // VoeRTP_RTCP
-    uint8_t _extraPayloadType;
-    bool _insertExtraRTPPacket;
-    bool _extraMarkerBit;
     uint32_t _lastLocalTimeStamp;
     uint32_t _lastRemoteTimeStamp;
     int8_t _lastPayloadType;
@@ -551,6 +618,8 @@ private:
     uint32_t _countAliveDetections;
     uint32_t _countDeadDetections;
     AudioFrame::SpeechType _outputSpeechType;
+    ViENetwork* vie_network_;
+    int video_channel_;
     // VoEVideoSync
     uint32_t _average_jitter_buffer_delay_us;
     int least_required_delay_ms_;
@@ -558,7 +627,6 @@ private:
     uint16_t _recPacketDelayMs;
     // VoEAudioProcessing
     bool _RxVadDetection;
-    bool _rxApmIsEnabled;
     bool _rxAgcIsEnabled;
     bool _rxNsIsEnabled;
     bool restored_packet_in_use_;

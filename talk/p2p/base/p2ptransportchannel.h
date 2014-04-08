@@ -40,6 +40,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include "talk/base/asyncpacketsocket.h"
 #include "talk/base/sigslot.h"
 #include "talk/p2p/base/candidate.h"
 #include "talk/p2p/base/portinterface.h"
@@ -78,6 +79,8 @@ class P2PTransportChannel : public TransportChannelImpl,
   virtual void SetIceRole(IceRole role);
   virtual IceRole GetIceRole() const { return ice_role_; }
   virtual void SetIceTiebreaker(uint64 tiebreaker);
+  virtual size_t GetConnectionCount() const { return connections_.size(); }
+  virtual bool GetIceProtocolType(IceProtocolType* type) const;
   virtual void SetIceProtocolType(IceProtocolType type);
   virtual void SetIceCredentials(const std::string& ice_ufrag,
                                  const std::string& ice_pwd);
@@ -91,7 +94,7 @@ class P2PTransportChannel : public TransportChannelImpl,
 
   // From TransportChannel:
   virtual int SendPacket(const char *data, size_t len,
-                         talk_base::DiffServCodePoint dscp, int flags);
+                         const talk_base::PacketOptions& options, int flags);
   virtual int SetOption(talk_base::Socket::Option opt, int value);
   virtual int GetError() { return error_; }
   virtual bool GetStats(std::vector<ConnectionInfo>* stats);
@@ -186,6 +189,7 @@ class P2PTransportChannel : public TransportChannelImpl,
   bool FindConnection(cricket::Connection* connection) const;
 
   uint32 GetRemoteCandidateGeneration(const Candidate& candidate);
+  bool IsDuplicateRemoteCandidate(const Candidate& candidate);
   void RememberRemoteCandidate(const Candidate& remote_candidate,
                                PortInterface* origin_port);
   bool IsPingable(Connection* conn);
@@ -207,8 +211,9 @@ class P2PTransportChannel : public TransportChannelImpl,
   void OnPortDestroyed(PortInterface* port);
   void OnRoleConflict(PortInterface* port);
 
-  void OnConnectionStateChange(Connection *connection);
-  void OnReadPacket(Connection *connection, const char *data, size_t len);
+  void OnConnectionStateChange(Connection* connection);
+  void OnReadPacket(Connection *connection, const char *data, size_t len,
+                    const talk_base::PacketTime& packet_time);
   void OnReadyToSend(Connection* connection);
   void OnConnectionDestroyed(Connection *connection);
 

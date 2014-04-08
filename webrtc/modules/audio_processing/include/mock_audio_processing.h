@@ -181,11 +181,23 @@ class MockAudioProcessing : public AudioProcessing {
 
   MOCK_METHOD0(Initialize,
       int());
+  MOCK_METHOD5(Initialize,
+      int(int sample_rate_hz,
+          int reverse_sample_rate_hz,
+          int num_input_channels,
+          int num_output_channels,
+          int num_reverse_channels));
   MOCK_METHOD1(SetExtraOptions,
       void(const Config& config));
+  MOCK_METHOD1(EnableExperimentalNs,
+      int(bool enable));
+  MOCK_CONST_METHOD0(experimental_ns_enabled,
+      bool());
   MOCK_METHOD1(set_sample_rate_hz,
       int(int rate));
   MOCK_CONST_METHOD0(sample_rate_hz,
+      int());
+  MOCK_CONST_METHOD0(split_sample_rate_hz,
       int());
   MOCK_METHOD2(set_num_channels,
       int(int input_channels, int output_channels));
@@ -197,20 +209,39 @@ class MockAudioProcessing : public AudioProcessing {
       int(int channels));
   MOCK_CONST_METHOD0(num_reverse_channels,
       int());
+  MOCK_METHOD1(set_output_will_be_muted,
+      void(bool muted));
+  MOCK_CONST_METHOD0(output_will_be_muted,
+      bool());
   MOCK_METHOD1(ProcessStream,
       int(AudioFrame* frame));
+  MOCK_METHOD5(ProcessStream,
+      int(float* const* data, int frames, int sample_rate_hz,
+          ChannelLayout input_layout,
+          ChannelLayout output_layout));
   MOCK_METHOD1(AnalyzeReverseStream,
       int(AudioFrame* frame));
+  MOCK_METHOD4(AnalyzeReverseStream,
+      int(const float* const* data, int frames, int sample_rate_hz,
+          ChannelLayout input_layout));
   MOCK_METHOD1(set_stream_delay_ms,
       int(int delay));
   MOCK_CONST_METHOD0(stream_delay_ms,
       int());
+  MOCK_CONST_METHOD0(was_stream_delay_set,
+      bool());
+  MOCK_METHOD1(set_stream_key_pressed,
+      void(bool key_pressed));
+  MOCK_CONST_METHOD0(stream_key_pressed,
+      bool());
   MOCK_METHOD1(set_delay_offset_ms,
       void(int offset));
   MOCK_CONST_METHOD0(delay_offset_ms,
       int());
   MOCK_METHOD1(StartDebugRecording,
       int(const char filename[kMaxFilenameSize]));
+  MOCK_METHOD1(StartDebugRecording,
+      int(FILE* handle));
   MOCK_METHOD0(StopDebugRecording,
       int());
   virtual MockEchoCancellation* echo_cancellation() const {
@@ -224,20 +255,16 @@ class MockAudioProcessing : public AudioProcessing {
   }
   virtual MockHighPassFilter* high_pass_filter() const {
     return high_pass_filter_.get();
-  };
+  }
   virtual MockLevelEstimator* level_estimator() const {
     return level_estimator_.get();
-  };
+  }
   virtual MockNoiseSuppression* noise_suppression() const {
     return noise_suppression_.get();
-  };
+  }
   virtual MockVoiceDetection* voice_detection() const {
     return voice_detection_.get();
-  };
-  MOCK_METHOD0(TimeUntilNextProcess,
-      int32_t());
-  MOCK_METHOD0(Process,
-      int32_t());
+  }
 
  private:
   scoped_ptr<MockEchoCancellation> echo_cancellation_;

@@ -187,45 +187,33 @@ VideoCaptureImpl::~VideoCaptureImpl()
         delete[] _deviceUniqueId;
 }
 
-int32_t VideoCaptureImpl::RegisterCaptureDataCallback(
-                                        VideoCaptureDataCallback& dataCallBack)
-{
+void VideoCaptureImpl::RegisterCaptureDataCallback(
+    VideoCaptureDataCallback& dataCallBack) {
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
     _dataCallBack = &dataCallBack;
-
-    return 0;
 }
 
-int32_t VideoCaptureImpl::DeRegisterCaptureDataCallback()
-{
+void VideoCaptureImpl::DeRegisterCaptureDataCallback() {
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
     _dataCallBack = NULL;
-    return 0;
 }
-int32_t VideoCaptureImpl::RegisterCaptureCallback(VideoCaptureFeedBack& callBack)
-{
+void VideoCaptureImpl::RegisterCaptureCallback(VideoCaptureFeedBack& callBack) {
 
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
     _captureCallBack = &callBack;
-    return 0;
 }
-int32_t VideoCaptureImpl::DeRegisterCaptureCallback()
-{
+void VideoCaptureImpl::DeRegisterCaptureCallback() {
 
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
     _captureCallBack = NULL;
-    return 0;
-
 }
-int32_t VideoCaptureImpl::SetCaptureDelay(int32_t delayMS)
-{
+void VideoCaptureImpl::SetCaptureDelay(int32_t delayMS) {
     CriticalSectionScoped cs(&_apiCs);
     _captureDelay = delayMS;
-    return 0;
 }
 int32_t VideoCaptureImpl::CaptureDelay()
 {
@@ -275,8 +263,6 @@ int32_t VideoCaptureImpl::IncomingFrame(
     WEBRTC_TRACE(webrtc::kTraceStream, webrtc::kTraceVideoCapture, _id,
                "IncomingFrame width %d, height %d", (int) frameInfo.width,
                (int) frameInfo.height);
-
-    TickTime startProcessTime = TickTime::Now();
 
     CriticalSectionScoped cs(&_callBackCs);
 
@@ -346,39 +332,14 @@ int32_t VideoCaptureImpl::IncomingFrame(
         return -1;
     }
 
-    const uint32_t processTime =
-        (uint32_t)(TickTime::Now() - startProcessTime).Milliseconds();
-    if (processTime > 10) // If the process time is too long MJPG will not work well.
-    {
-        WEBRTC_TRACE(webrtc::kTraceWarning, webrtc::kTraceVideoCapture, _id,
-                   "Too long processing time of Incoming frame: %ums",
-                   (unsigned int) processTime);
-    }
-
     return 0;
 }
 
-int32_t VideoCaptureImpl::IncomingFrameI420(
-    const VideoFrameI420& video_frame, int64_t captureTime) {
+int32_t VideoCaptureImpl::IncomingI420VideoFrame(I420VideoFrame* video_frame,
+                                                 int64_t captureTime) {
 
   CriticalSectionScoped cs(&_callBackCs);
-  int size_y = video_frame.height * video_frame.y_pitch;
-  int size_u = video_frame.u_pitch * ((video_frame.height + 1) / 2);
-  int size_v =  video_frame.v_pitch * ((video_frame.height + 1) / 2);
-  // TODO(mikhal): Can we use Swap here? This will do a memcpy.
-  int ret = _captureFrame.CreateFrame(size_y, video_frame.y_plane,
-                                      size_u, video_frame.u_plane,
-                                      size_v, video_frame.v_plane,
-                                      video_frame.width, video_frame.height,
-                                      video_frame.y_pitch, video_frame.u_pitch,
-                                      video_frame.v_pitch);
-  if (ret < 0) {
-    WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, _id,
-                 "Failed to create I420VideoFrame");
-    return -1;
-  }
-
-  DeliverCapturedFrame(_captureFrame, captureTime);
+  DeliverCapturedFrame(*video_frame, captureTime);
 
   return 0;
 }
@@ -405,8 +366,7 @@ int32_t VideoCaptureImpl::SetCaptureRotation(VideoCaptureRotation rotation) {
   return 0;
 }
 
-int32_t VideoCaptureImpl::EnableFrameRateCallback(const bool enable)
-{
+void VideoCaptureImpl::EnableFrameRateCallback(const bool enable) {
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
     _frameRateCallBack = enable;
@@ -414,15 +374,12 @@ int32_t VideoCaptureImpl::EnableFrameRateCallback(const bool enable)
     {
         _lastFrameRateCallbackTime = TickTime::Now();
     }
-    return 0;
 }
 
-int32_t VideoCaptureImpl::EnableNoPictureAlarm(const bool enable)
-{
+void VideoCaptureImpl::EnableNoPictureAlarm(const bool enable) {
     CriticalSectionScoped cs(&_apiCs);
     CriticalSectionScoped cs2(&_callBackCs);
     _noPictureAlarmCallBack = enable;
-    return 0;
 }
 
 void VideoCaptureImpl::UpdateFrameCount()

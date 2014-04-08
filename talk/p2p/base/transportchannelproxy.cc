@@ -102,14 +102,14 @@ void TransportChannelProxy::SetImplementation(TransportChannelImpl* impl) {
 }
 
 int TransportChannelProxy::SendPacket(const char* data, size_t len,
-                                      talk_base::DiffServCodePoint dscp,
+                                      const talk_base::PacketOptions& options,
                                       int flags) {
   ASSERT(talk_base::Thread::Current() == worker_thread_);
   // Fail if we don't have an impl yet.
   if (!impl_) {
     return -1;
   }
-  return impl_->SendPacket(data, len, dscp, flags);
+  return impl_->SendPacket(data, len, options, flags);
 }
 
 int TransportChannelProxy::SetOption(talk_base::Socket::Option opt, int value) {
@@ -234,12 +234,12 @@ void TransportChannelProxy::OnWritableState(TransportChannel* channel) {
   // Note: SignalWritableState fired by set_readable.
 }
 
-void TransportChannelProxy::OnReadPacket(TransportChannel* channel,
-                                         const char* data, size_t size,
-                                         int flags) {
+void TransportChannelProxy::OnReadPacket(
+    TransportChannel* channel, const char* data, size_t size,
+    const talk_base::PacketTime& packet_time, int flags) {
   ASSERT(talk_base::Thread::Current() == worker_thread_);
   ASSERT(channel == impl_);
-  SignalReadPacket(this, data, size, flags);
+  SignalReadPacket(this, data, size, packet_time, flags);
 }
 
 void TransportChannelProxy::OnReadyToSend(TransportChannel* channel) {

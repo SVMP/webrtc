@@ -1,2 +1,2 @@
-# Tests that are too slow.
-RampUpTest/*
+# https://code.google.com/p/webrtc/issues/detail?id=2908
+CallTest.ReceivesAndRetransmitsNack

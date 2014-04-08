@@ -20,6 +20,7 @@
 #include "webrtc/modules/video_coding/main/interface/video_coding_defines.h"
 #include "webrtc/modules/video_processing/main/interface/video_processing.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/thread_annotations.h"
 #include "webrtc/typedefs.h"
 #include "webrtc/frame_callback.h"
 #include "webrtc/video_engine/vie_defines.h"
@@ -29,6 +30,7 @@ namespace webrtc {
 
 class Config;
 class CriticalSectionWrapper;
+class EncodedImageCallback;
 class PacedSender;
 class ProcessThread;
 class QMVideoSettingsCallback;
@@ -67,8 +69,6 @@ class ViEEncoder
   // Drops incoming packets before they get to the encoder.
   void Pause();
   void Restart();
-
-  int32_t DropDeltaAfterKey(bool enable);
 
   // Codec settings.
   uint8_t NumberOfCodecs();
@@ -110,6 +110,7 @@ class ViEEncoder
   int32_t SendCodecStatistics(uint32_t* num_key_frames,
                               uint32_t* num_delta_frames);
 
+  int PacerQueuingDelayMs() const;
   int32_t EstimatedSendBandwidth(
         uint32_t* available_bandwidth) const;
 
@@ -154,6 +155,8 @@ class ViEEncoder
   // Sets SSRCs for all streams.
   bool SetSsrcs(const std::list<unsigned int>& ssrcs);
 
+  void SetMinTransmitBitrate(int min_transmit_bitrate_kbps);
+
   // Effect filter.
   int32_t RegisterEffectFilter(ViEEffectFilter* effect_filter);
 
@@ -163,16 +166,20 @@ class ViEEncoder
   // Disables recording of debugging information.
   virtual int StopDebugRecording();
 
-  // Enables AutoMuter to turn off video when the rate drops below
+  // Lets the sender suspend video when the rate drops below
   // |threshold_bps|, and turns back on when the rate goes back up above
   // |threshold_bps| + |window_bps|.
-  virtual void EnableAutoMuting();
+  virtual void SuspendBelowMinBitrate();
 
-  // New-style callback, used by VideoSendStream.
+  // New-style callbacks, used by VideoSendStream.
   void RegisterPreEncodeCallback(I420FrameCallback* pre_encode_callback);
   void DeRegisterPreEncodeCallback();
+  void RegisterPostEncodeImageCallback(
+        EncodedImageCallback* post_encode_callback);
+  void DeRegisterPostEncodeImageCallback();
 
   int channel_id() const { return channel_id_; }
+
  protected:
   // Called by BitrateObserver.
   void OnNetworkChanged(const uint32_t bitrate_bps,
@@ -181,7 +188,7 @@ class ViEEncoder
 
   // Called by PacedSender.
   bool TimeToSendPacket(uint32_t ssrc, uint16_t sequence_number,
-                        int64_t capture_time_ms);
+                        int64_t capture_time_ms, bool retransmission);
   int TimeToSendPadding(int bytes);
  private:
   bool EncoderPaused() const;
@@ -203,18 +210,17 @@ class ViEEncoder
 
   int64_t time_of_last_incoming_frame_ms_;
   bool send_padding_;
+  int min_transmit_bitrate_kbps_ GUARDED_BY(data_cs_);
   int target_delay_ms_;
   bool network_is_transmitting_;
   bool encoder_paused_;
   bool encoder_paused_and_dropped_frame_;
   std::map<unsigned int, int64_t> time_last_intra_request_ms_;
-  int32_t channels_dropping_delta_frames_;
-  bool drop_next_frame_;
 
   bool fec_enabled_;
   bool nack_enabled_;
 
-  ViEEncoderObserver* codec_observer_;
+  ViEEncoderObserver* codec_observer_ GUARDED_BY(callback_cs_);
   ViEEffectFilter* effect_filter_;
   ProcessThread& module_process_thread_;
 
@@ -226,7 +232,7 @@ class ViEEncoder
 
   // Quality modes callback
   QMVideoSettingsCallback* qm_callback_;
-  bool video_auto_muted_;
+  bool video_suspended_;
   I420FrameCallback* pre_encode_callback_;
 };
 

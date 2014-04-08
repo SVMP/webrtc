@@ -54,7 +54,8 @@ RTCPReceiver::RTCPReceiver(const int32_t id, Clock* clock,
     _receivedInfoMap(),
     _packetTimeOutMS(0),
     _lastReceivedRrMs(0),
-    _lastIncreasedSequenceNumberMs(0) {
+    _lastIncreasedSequenceNumberMs(0),
+    stats_callback_(NULL) {
     memset(&_remoteSenderInfo, 0, sizeof(_remoteSenderInfo));
     WEBRTC_TRACE(kTraceMemory, kTraceRtpRtcp, id, "%s created", __FUNCTION__);
 }
@@ -316,6 +317,12 @@ int32_t RTCPReceiver::StatisticsReceived(
   return 0;
 }
 
+void RTCPReceiver::GetPacketTypeCounter(
+    RtcpPacketTypeCounter* packet_counter) const {
+  CriticalSectionScoped lock(_criticalSectionRTCPReceiver);
+  *packet_counter = packet_type_counter_;
+}
+
 int32_t
 RTCPReceiver::IncomingRTCPPacket(RTCPPacketInformation& rtcpPacketInformation,
                                  RTCPUtility::RTCPParserV2* rtcpParser)
@@ -479,11 +486,12 @@ RTCPReceiver::HandleSenderReceiverReport(RTCPUtility::RTCPParserV2& rtcpParser,
 }
 
 // no need for critsect we have _criticalSectionRTCPReceiver
-void
-RTCPReceiver::HandleReportBlock(const RTCPUtility::RTCPPacket& rtcpPacket,
-                                RTCPPacketInformation& rtcpPacketInformation,
-                                const uint32_t remoteSSRC,
-                                const uint8_t numberOfReportBlocks) {
+void RTCPReceiver::HandleReportBlock(
+    const RTCPUtility::RTCPPacket& rtcpPacket,
+    RTCPPacketInformation& rtcpPacketInformation,
+    const uint32_t remoteSSRC,
+    const uint8_t numberOfReportBlocks)
+    EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPReceiver) {
   // This will be called once per report block in the RTCP packet.
   // We filter out all report blocks that are not for us.
   // Each packet has max 31 RR blocks.
@@ -837,6 +845,10 @@ RTCPReceiver::HandleNACK(RTCPUtility::RTCPParserV2& rtcpParser,
         HandleNACKItem(rtcpPacket, rtcpPacketInformation);
         pktType = rtcpParser.Iterate();
     }
+
+    if (rtcpPacketInformation.rtcpPacketTypeFlags & kRtcpNack) {
+      ++packet_type_counter_.nack_packets;
+    }
 }
 
 // no need for critsect we have _criticalSectionRTCPReceiver
@@ -939,7 +951,8 @@ void RTCPReceiver::HandleXrDlrrReportBlock(
 
 void RTCPReceiver::HandleXrDlrrReportBlockItem(
     const RTCPUtility::RTCPPacket& packet,
-    RTCPPacketInformation& rtcpPacketInformation) {
+    RTCPPacketInformation& rtcpPacketInformation)
+    EXCLUSIVE_LOCKS_REQUIRED(_criticalSectionRTCPReceiver) {
   if (registered_ssrcs_.find(packet.XRDLRRReportBlockItem.SSRC) ==
       registered_ssrcs_.end()) {
     // Not to us.
@@ -1025,6 +1038,7 @@ void RTCPReceiver::HandlePLI(RTCPUtility::RTCPParserV2& rtcpParser,
   if (main_ssrc_ == rtcpPacket.PLI.MediaSSRC) {
     TRACE_EVENT_INSTANT0("webrtc_rtp", "PLI");
 
+    ++packet_type_counter_.pli_packets;
     // Received a signal that we need to send a new key frame.
     rtcpPacketInformation.rtcpPacketTypeFlags |= kRtcpPli;
   }
@@ -1267,6 +1281,9 @@ void RTCPReceiver::HandleFIRItem(RTCPReceiveInformation* receiveInfo,
   if (main_ssrc_ != rtcpPacket.FIRItem.SSRC) {
     return;
   }
+
+  ++packet_type_counter_.fir_packets;
+
   // rtcpPacket.FIR.MediaSSRC SHOULD be 0 but we ignore to check it
   // we don't know who this originate from
   if (receiveInfo) {
@@ -1357,6 +1374,19 @@ int32_t RTCPReceiver::UpdateTMMBR() {
     }
   }
   return 0;
+}
+
+void RTCPReceiver::RegisterRtcpStatisticsCallback(
+    RtcpStatisticsCallback* callback) {
+  CriticalSectionScoped cs(_criticalSectionFeedbacks);
+  if (callback != NULL)
+    assert(stats_callback_ == NULL);
+  stats_callback_ = callback;
+}
+
+RtcpStatisticsCallback* RTCPReceiver::GetRtcpStatisticsCallback() {
+  CriticalSectionScoped cs(_criticalSectionFeedbacks);
+  return stats_callback_;
 }
 
 // Holding no Critical section
@@ -1450,6 +1480,24 @@ void RTCPReceiver::TriggerCallbacksFromRTCPPacket(
             rtcpPacketInformation.applicationName,
             rtcpPacketInformation.applicationLength,
             rtcpPacketInformation.applicationData);
+      }
+    }
+  }
+
+  {
+    CriticalSectionScoped cs(_criticalSectionFeedbacks);
+    if (stats_callback_) {
+      for (ReportBlockList::const_iterator it =
+          rtcpPacketInformation.report_blocks.begin();
+          it != rtcpPacketInformation.report_blocks.end();
+          ++it) {
+        RtcpStatistics stats;
+        stats.cumulative_lost = it->cumulativeLost;
+        stats.extended_max_sequence_number = it->extendedHighSeqNum;
+        stats.fraction_lost = it->fractionLost;
+        stats.jitter = it->jitter;
+
+        stats_callback_->StatisticsUpdated(stats, local_ssrc);
       }
     }
   }

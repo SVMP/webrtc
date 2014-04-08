@@ -14,6 +14,8 @@
       'dependencies': [
         'NetEq4',
         'NetEq4TestTools',
+        'neteq_unittest_tools',
+        'PCM16B',
         '<(webrtc_root)/test/test.gyp:test_support_main',
         '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
       ],
@@ -56,6 +58,7 @@
       'include_dirs': [
         'interface',
         'test',
+        '<(webrtc_root)',
       ],
       'sources': [
         'test/RTPencode.cc',
@@ -78,14 +81,15 @@
     },
 
     {
-      'target_name': 'RTPanalyze',
+      'target_name': 'rtp_analyze',
       'type': 'executable',
       'dependencies': [
         'NetEq4TestTools',
         '<(DEPTH)/testing/gtest.gyp:gtest',
+        '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
       ],
       'sources': [
-        'test/RTPanalyze.cc',
+        'tools/rtp_analyze.cc',
       ],
     },
 
@@ -138,6 +142,17 @@
     },
 
     {
+      'target_name': 'audio_classifier_test',
+      'type': 'executable',
+      'dependencies': [
+        'NetEq4',
+      ],
+      'sources': [
+        'test/audio_classifier_test.cc',
+      ],
+    },
+
+    {
       'target_name': 'neteq4_speed_test',
       'type': 'executable',
       'dependencies': [
@@ -145,9 +160,26 @@
         'neteq_unittest_tools',
         'PCM16B',
         '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
+        '<(webrtc_root)/test/test.gyp:test_support_main',
       ],
       'sources': [
         'test/neteq_speed_test.cc',
+      ],
+    },
+
+    {
+      'target_name': 'neteq4_opus_fec_quality_test',
+      'type': 'executable',
+      'dependencies': [
+        'NetEq4',
+        'neteq_unittest_tools',
+        'webrtc_opus',
+        '<(DEPTH)/testing/gtest.gyp:gtest',
+        '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
+        '<(webrtc_root)/test/test.gyp:test_support_main',
+      ],
+      'sources': [
+        'test/neteq_opus_fec_quality_test.cc',
       ],
     },
 
@@ -172,6 +204,7 @@
         'include_dirs': [
           'interface',
           'test',
+          '<(webrtc_root)',
         ],
       },
       'defines': [
@@ -179,6 +212,7 @@
       'include_dirs': [
         'interface',
         'test',
+        '<(webrtc_root)',
       ],
       'sources': [
         'test/NETEQTEST_DummyRTPpacket.cc',

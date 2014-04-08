@@ -34,6 +34,7 @@
 #include "talk/base/physicalsocketserver.h"
 #include "talk/base/scoped_ptr.h"
 #include "talk/base/socketaddress.h"
+#include "talk/base/ssladapter.h"
 #include "talk/base/stringutils.h"
 #include "talk/base/thread.h"
 #include "talk/base/virtualsocketserver.h"
@@ -172,7 +173,7 @@ class TestPort : public Port {
   }
   virtual int SendTo(
       const void* data, size_t size, const talk_base::SocketAddress& addr,
-      talk_base::DiffServCodePoint dscp, bool payload) {
+      const talk_base::PacketOptions& options, bool payload) {
     if (!payload) {
       IceMessage* msg = new IceMessage;
       ByteBuffer* buf = new ByteBuffer(static_cast<const char*>(data), size);
@@ -213,12 +214,14 @@ class TestPort : public Port {
 
 class TestChannel : public sigslot::has_slots<> {
  public:
+  // Takes ownership of |p1| (but not |p2|).
   TestChannel(Port* p1, Port* p2)
       : ice_mode_(ICEMODE_FULL), src_(p1), dst_(p2), complete_count_(0),
 	conn_(NULL), remote_request_(), nominated_(false) {
     src_->SignalPortComplete.connect(
         this, &TestChannel::OnPortComplete);
     src_->SignalUnknownAddress.connect(this, &TestChannel::OnUnknownAddress);
+    src_->SignalDestroyed.connect(this, &TestChannel::OnSrcPortDestroyed);
   }
 
   int complete_count() { return complete_count_; }
@@ -305,6 +308,11 @@ class TestChannel : public sigslot::has_slots<> {
     conn_ = NULL;
   }
 
+  void OnSrcPortDestroyed(PortInterface* port) {
+    Port* destroyed_src = src_.release();
+    ASSERT_EQ(destroyed_src, port);
+  }
+
   bool nominated() const { return nominated_; }
 
  private:
@@ -341,15 +349,20 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
         username_(talk_base::CreateRandomString(ICE_UFRAG_LENGTH)),
         password_(talk_base::CreateRandomString(ICE_PWD_LENGTH)),
         ice_protocol_(cricket::ICEPROTO_GOOGLE),
-        role_conflict_(false) {
+        role_conflict_(false),
+        destroyed_(false) {
     network_.AddIP(talk_base::IPAddress(INADDR_ANY));
   }
 
  protected:
   static void SetUpTestCase() {
-    // Ensure the RNG is inited.
-    talk_base::InitRandom(NULL, 0);
+    talk_base::InitializeSSL();
   }
+
+  static void TearDownTestCase() {
+    talk_base::CleanupSSL();
+  }
+
 
   void TestLocalToLocal() {
     Port* port1 = CreateUdpPort(kLocalAddr1);
@@ -513,11 +526,16 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
 
   void TestCrossFamilyPorts(int type);
 
-  // this does all the work
+  // This does all the work and then deletes |port1| and |port2|.
   void TestConnectivity(const char* name1, Port* port1,
                         const char* name2, Port* port2,
                         bool accept, bool same_addr1,
                         bool same_addr2, bool possible);
+
+  // This connects and disconnects the provided channels in the same sequence as
+  // TestConnectivity with all options set to |true|.  It does not delete either
+  // channel.
+  void ConnectAndDisconnectChannels(TestChannel* ch1, TestChannel* ch2);
 
   void SetIceProtocolType(cricket::IceProtocolType protocol) {
     ice_protocol_ = protocol;
@@ -562,6 +580,15 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
   }
   bool role_conflict() const { return role_conflict_; }
 
+  void ConnectToSignalDestroyed(PortInterface* port) {
+    port->SignalDestroyed.connect(this, &PortTest::OnDestroyed);
+  }
+
+  void OnDestroyed(PortInterface* port) {
+    destroyed_ = true;
+  }
+  bool destroyed() const { return destroyed_; }
+
   talk_base::BasicPacketSocketFactory* nat_socket_factory1() {
     return &nat_socket_factory1_;
   }
@@ -586,6 +613,7 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
   std::string password_;
   cricket::IceProtocolType ice_protocol_;
   bool role_conflict_;
+  bool destroyed_;
 };
 
 void PortTest::TestConnectivity(const char* name1, Port* port1,
@@ -596,7 +624,7 @@ void PortTest::TestConnectivity(const char* name1, Port* port1,
   port1->set_component(cricket::ICE_CANDIDATE_COMPONENT_DEFAULT);
   port2->set_component(cricket::ICE_CANDIDATE_COMPONENT_DEFAULT);
 
-  // Set up channels.
+  // Set up channels and ensure both ports will be deleted.
   TestChannel ch1(port1, port2);
   TestChannel ch2(port2, port1);
   EXPECT_EQ(0, ch1.complete_count());
@@ -719,6 +747,29 @@ void PortTest::TestConnectivity(const char* name1, Port* port1,
   EXPECT_TRUE_WAIT(ch2.conn() == NULL, kTimeout);
 }
 
+void PortTest::ConnectAndDisconnectChannels(TestChannel* ch1,
+                                            TestChannel* ch2) {
+  // Acquire addresses.
+  ch1->Start();
+  ch2->Start();
+
+  // Send a ping from src to dst.
+  ch1->CreateConnection();
+  EXPECT_TRUE_WAIT(ch1->conn()->connected(), kTimeout);  // for TCP connect
+  ch1->Ping();
+  WAIT(!ch2->remote_address().IsNil(), kTimeout);
+
+  // Send a ping from dst to src.
+  ch2->AcceptConnection();
+  ch2->Ping();
+  EXPECT_EQ_WAIT(Connection::STATE_WRITABLE, ch2->conn()->write_state(),
+                 kTimeout);
+
+  // Destroy the connections.
+  ch1->Stop();
+  ch2->Stop();
+}
+
 class FakePacketSocketFactory : public talk_base::PacketSocketFactory {
  public:
   FakePacketSocketFactory()
@@ -766,6 +817,9 @@ class FakePacketSocketFactory : public talk_base::PacketSocketFactory {
   void set_next_client_tcp_socket(AsyncPacketSocket* next_client_tcp_socket) {
     next_client_tcp_socket_ = next_client_tcp_socket;
   }
+  talk_base::AsyncResolverInterface* CreateAsyncResolver() {
+    return NULL;
+  }
 
  private:
   AsyncPacketSocket* next_udp_socket_;
@@ -788,11 +842,11 @@ class FakeAsyncPacketSocket : public AsyncPacketSocket {
 
   // Send a packet.
   virtual int Send(const void *pv, size_t cb,
-                   talk_base::DiffServCodePoint dscp) {
+                   const talk_base::PacketOptions& options) {
     return static_cast<int>(cb);
   }
   virtual int SendTo(const void *pv, size_t cb, const SocketAddress& addr,
-                     talk_base::DiffServCodePoint dscp) {
+                     const talk_base::PacketOptions& options) {
     return static_cast<int>(cb);
   }
   virtual int Close() {
@@ -1046,7 +1100,8 @@ TEST_F(PortTest, TestLoopbackCallAsIce) {
   IceMessage* msg = lport->last_stun_msg();
   EXPECT_EQ(STUN_BINDING_REQUEST, msg->type());
   conn->OnReadPacket(lport->last_stun_buf()->Data(),
-                     lport->last_stun_buf()->Length());
+                     lport->last_stun_buf()->Length(),
+                     talk_base::PacketTime());
   ASSERT_TRUE_WAIT(lport->last_stun_msg() != NULL, 1000);
   msg = lport->last_stun_msg();
   EXPECT_EQ(STUN_BINDING_RESPONSE, msg->type());
@@ -1079,7 +1134,7 @@ TEST_F(PortTest, TestLoopbackCallAsIce) {
   lport->Reset();
   talk_base::scoped_ptr<ByteBuffer> buf(new ByteBuffer());
   WriteStunMessage(modified_req.get(), buf.get());
-  conn1->OnReadPacket(buf->Data(), buf->Length());
+  conn1->OnReadPacket(buf->Data(), buf->Length(), talk_base::PacketTime());
   ASSERT_TRUE_WAIT(lport->last_stun_msg() != NULL, 1000);
   msg = lport->last_stun_msg();
   EXPECT_EQ(STUN_BINDING_ERROR_RESPONSE, msg->type());
@@ -1117,7 +1172,8 @@ TEST_F(PortTest, TestIceRoleConflict) {
   EXPECT_EQ(STUN_BINDING_REQUEST, msg->type());
   // Send rport binding request to lport.
   lconn->OnReadPacket(rport->last_stun_buf()->Data(),
-                      rport->last_stun_buf()->Length());
+                      rport->last_stun_buf()->Length(),
+                      talk_base::PacketTime());
 
   ASSERT_TRUE_WAIT(lport->last_stun_msg() != NULL, 1000);
   EXPECT_EQ(STUN_BINDING_RESPONSE, lport->last_stun_msg()->type());
@@ -1229,21 +1285,37 @@ TEST_F(PortTest, TestSkipCrossFamilyUdp) {
 // This test verifies DSCP value set through SetOption interface can be
 // get through DefaultDscpValue.
 TEST_F(PortTest, TestDefaultDscpValue) {
+  int dscp;
   talk_base::scoped_ptr<UDPPort> udpport(CreateUdpPort(kLocalAddr1));
-  udpport->SetOption(talk_base::Socket::OPT_DSCP, talk_base::DSCP_CS6);
-  EXPECT_EQ(talk_base::DSCP_CS6, udpport->DefaultDscpValue());
+  EXPECT_EQ(0, udpport->SetOption(talk_base::Socket::OPT_DSCP,
+                                  talk_base::DSCP_CS6));
+  EXPECT_EQ(0, udpport->GetOption(talk_base::Socket::OPT_DSCP, &dscp));
   talk_base::scoped_ptr<TCPPort> tcpport(CreateTcpPort(kLocalAddr1));
-  tcpport->SetOption(talk_base::Socket::OPT_DSCP, talk_base::DSCP_AF31);
-  EXPECT_EQ(talk_base::DSCP_AF31, tcpport->DefaultDscpValue());
+  EXPECT_EQ(0, tcpport->SetOption(talk_base::Socket::OPT_DSCP,
+                                 talk_base::DSCP_AF31));
+  EXPECT_EQ(0, tcpport->GetOption(talk_base::Socket::OPT_DSCP, &dscp));
+  EXPECT_EQ(talk_base::DSCP_AF31, dscp);
   talk_base::scoped_ptr<StunPort> stunport(
       CreateStunPort(kLocalAddr1, nat_socket_factory1()));
-  stunport->SetOption(talk_base::Socket::OPT_DSCP, talk_base::DSCP_AF41);
-  EXPECT_EQ(talk_base::DSCP_AF41, stunport->DefaultDscpValue());
-  talk_base::scoped_ptr<TurnPort> turnport(CreateTurnPort(
+  EXPECT_EQ(0, stunport->SetOption(talk_base::Socket::OPT_DSCP,
+                                  talk_base::DSCP_AF41));
+  EXPECT_EQ(0, stunport->GetOption(talk_base::Socket::OPT_DSCP, &dscp));
+  EXPECT_EQ(talk_base::DSCP_AF41, dscp);
+  talk_base::scoped_ptr<TurnPort> turnport1(CreateTurnPort(
       kLocalAddr1, nat_socket_factory1(), PROTO_UDP, PROTO_UDP));
-  turnport->SetOption(talk_base::Socket::OPT_DSCP, talk_base::DSCP_CS7);
-  EXPECT_EQ(talk_base::DSCP_CS7, turnport->DefaultDscpValue());
-  // TODO(mallinath) - Test DSCP through GetOption.
+  // Socket is created in PrepareAddress.
+  turnport1->PrepareAddress();
+  EXPECT_EQ(0, turnport1->SetOption(talk_base::Socket::OPT_DSCP,
+                                  talk_base::DSCP_CS7));
+  EXPECT_EQ(0, turnport1->GetOption(talk_base::Socket::OPT_DSCP, &dscp));
+  EXPECT_EQ(talk_base::DSCP_CS7, dscp);
+  // This will verify correct value returned without the socket.
+  talk_base::scoped_ptr<TurnPort> turnport2(CreateTurnPort(
+      kLocalAddr1, nat_socket_factory1(), PROTO_UDP, PROTO_UDP));
+  EXPECT_EQ(0, turnport2->SetOption(talk_base::Socket::OPT_DSCP,
+                                  talk_base::DSCP_CS6));
+  EXPECT_EQ(0, turnport2->GetOption(talk_base::Socket::OPT_DSCP, &dscp));
+  EXPECT_EQ(talk_base::DSCP_CS6, dscp);
 }
 
 // Test sending STUN messages in GICE format.
@@ -1614,6 +1686,81 @@ TEST_F(PortTest, TestHandleStunMessageAsIce) {
       out_msg->GetErrorCode()->reason());
 }
 
+// This test verifies port can handle ICE messages in Hybrid mode and switches
+// ICEPROTO_RFC5245 mode after successfully handling the message.
+TEST_F(PortTest, TestHandleStunMessageAsIceInHybridMode) {
+  // Our port will act as the "remote" port.
+  talk_base::scoped_ptr<TestPort> port(
+      CreateTestPort(kLocalAddr2, "rfrag", "rpass"));
+  port->SetIceProtocolType(ICEPROTO_HYBRID);
+
+  talk_base::scoped_ptr<IceMessage> in_msg, out_msg;
+  talk_base::scoped_ptr<ByteBuffer> buf(new ByteBuffer());
+  talk_base::SocketAddress addr(kLocalAddr1);
+  std::string username;
+
+  // BINDING-REQUEST from local to remote with valid ICE username,
+  // MESSAGE-INTEGRITY, and FINGERPRINT.
+  in_msg.reset(CreateStunMessageWithUsername(STUN_BINDING_REQUEST,
+                                             "rfrag:lfrag"));
+  in_msg->AddMessageIntegrity("rpass");
+  in_msg->AddFingerprint();
+  WriteStunMessage(in_msg.get(), buf.get());
+  EXPECT_TRUE(port->GetStunMessage(buf->Data(), buf->Length(), addr,
+                                   out_msg.accept(), &username));
+  EXPECT_TRUE(out_msg.get() != NULL);
+  EXPECT_EQ("lfrag", username);
+  EXPECT_EQ(ICEPROTO_RFC5245, port->IceProtocol());
+}
+
+// This test verifies port can handle GICE messages in Hybrid mode and switches
+// ICEPROTO_GOOGLE mode after successfully handling the message.
+TEST_F(PortTest, TestHandleStunMessageAsGiceInHybridMode) {
+  // Our port will act as the "remote" port.
+  talk_base::scoped_ptr<TestPort> port(
+      CreateTestPort(kLocalAddr2, "rfrag", "rpass"));
+  port->SetIceProtocolType(ICEPROTO_HYBRID);
+
+  talk_base::scoped_ptr<IceMessage> in_msg, out_msg;
+  talk_base::scoped_ptr<ByteBuffer> buf(new ByteBuffer());
+  talk_base::SocketAddress addr(kLocalAddr1);
+  std::string username;
+
+  // BINDING-REQUEST from local to remote with valid GICE username and no M-I.
+  in_msg.reset(CreateStunMessageWithUsername(STUN_BINDING_REQUEST,
+                                             "rfraglfrag"));
+  WriteStunMessage(in_msg.get(), buf.get());
+  EXPECT_TRUE(port->GetStunMessage(buf->Data(), buf->Length(), addr,
+                                   out_msg.accept(), &username));
+  EXPECT_TRUE(out_msg.get() != NULL);  // Succeeds, since this is GICE.
+  EXPECT_EQ("lfrag", username);
+  EXPECT_EQ(ICEPROTO_GOOGLE, port->IceProtocol());
+}
+
+// Verify port is not switched out of RFC5245 mode if GICE message is received
+// in that mode.
+TEST_F(PortTest, TestHandleStunMessageAsGiceInIceMode) {
+  // Our port will act as the "remote" port.
+  talk_base::scoped_ptr<TestPort> port(
+      CreateTestPort(kLocalAddr2, "rfrag", "rpass"));
+  port->SetIceProtocolType(ICEPROTO_RFC5245);
+
+  talk_base::scoped_ptr<IceMessage> in_msg, out_msg;
+  talk_base::scoped_ptr<ByteBuffer> buf(new ByteBuffer());
+  talk_base::SocketAddress addr(kLocalAddr1);
+  std::string username;
+
+  // BINDING-REQUEST from local to remote with valid GICE username and no M-I.
+  in_msg.reset(CreateStunMessageWithUsername(STUN_BINDING_REQUEST,
+                                             "rfraglfrag"));
+  WriteStunMessage(in_msg.get(), buf.get());
+  // Should fail as there is no MI and fingerprint.
+  EXPECT_FALSE(port->GetStunMessage(buf->Data(), buf->Length(), addr,
+                                    out_msg.accept(), &username));
+  EXPECT_EQ(ICEPROTO_RFC5245, port->IceProtocol());
+}
+
+
 // Tests handling of GICE binding requests with missing or incorrect usernames.
 TEST_F(PortTest, TestHandleStunMessageAsGiceBadUsername) {
   talk_base::scoped_ptr<TestPort> port(
@@ -1899,7 +2046,8 @@ TEST_F(PortTest, TestHandleStunBindingIndication) {
   EXPECT_EQ(STUN_BINDING_REQUEST, msg->type());
   // Send rport binding request to lport.
   lconn->OnReadPacket(rport->last_stun_buf()->Data(),
-                      rport->last_stun_buf()->Length());
+                      rport->last_stun_buf()->Length(),
+                      talk_base::PacketTime());
   ASSERT_TRUE_WAIT(lport->last_stun_msg() != NULL, 1000);
   EXPECT_EQ(STUN_BINDING_RESPONSE, lport->last_stun_msg()->type());
   uint32 last_ping_received1 = lconn->last_ping_received();
@@ -1907,7 +2055,7 @@ TEST_F(PortTest, TestHandleStunBindingIndication) {
   // Adding a delay of 100ms.
   talk_base::Thread::Current()->ProcessMessages(100);
   // Pinging lconn using stun indication message.
-  lconn->OnReadPacket(buf->Data(), buf->Length());
+  lconn->OnReadPacket(buf->Data(), buf->Length(), talk_base::PacketTime());
   uint32 last_ping_received2 = lconn->last_ping_received();
   EXPECT_GT(last_ping_received2, last_ping_received1);
 }
@@ -2149,16 +2297,15 @@ TEST_F(PortTest, TestWritableState) {
   // Data should be unsendable until the connection is accepted.
   char data[] = "abcd";
   int data_size = ARRAY_SIZE(data);
-  EXPECT_EQ(SOCKET_ERROR,
-            ch1.conn()->Send(data, data_size, talk_base::DSCP_NO_CHANGE));
+  talk_base::PacketOptions options;
+  EXPECT_EQ(SOCKET_ERROR, ch1.conn()->Send(data, data_size, options));
 
   // Accept the connection to return the binding response, transition to
   // writable, and allow data to be sent.
   ch2.AcceptConnection();
   EXPECT_EQ_WAIT(Connection::STATE_WRITABLE, ch1.conn()->write_state(),
                  kTimeout);
-  EXPECT_EQ(data_size,
-            ch1.conn()->Send(data, data_size, talk_base::DSCP_NO_CHANGE));
+  EXPECT_EQ(data_size, ch1.conn()->Send(data, data_size, options));
 
   // Ask the connection to update state as if enough time has passed to lose
   // full writability and 5 pings went unresponded to. We'll accomplish the
@@ -2171,8 +2318,7 @@ TEST_F(PortTest, TestWritableState) {
   EXPECT_EQ(Connection::STATE_WRITE_UNRELIABLE, ch1.conn()->write_state());
 
   // Data should be able to be sent in this state.
-  EXPECT_EQ(data_size,
-            ch1.conn()->Send(data, data_size, talk_base::DSCP_NO_CHANGE));
+  EXPECT_EQ(data_size, ch1.conn()->Send(data, data_size, options));
 
   // And now allow the other side to process the pings and send binding
   // responses.
@@ -2189,8 +2335,7 @@ TEST_F(PortTest, TestWritableState) {
   EXPECT_EQ(Connection::STATE_WRITE_TIMEOUT, ch1.conn()->write_state());
 
   // Now that the connection has completely timed out, data send should fail.
-  EXPECT_EQ(SOCKET_ERROR,
-            ch1.conn()->Send(data, data_size, talk_base::DSCP_NO_CHANGE));
+  EXPECT_EQ(SOCKET_ERROR, ch1.conn()->Send(data, data_size, options));
 
   ch1.Stop();
   ch2.Stop();
@@ -2269,7 +2414,8 @@ TEST_F(PortTest, TestIceLiteConnectivity) {
 
   // Feeding the respone message from litemode to the full mode connection.
   ch1.conn()->OnReadPacket(ice_lite_port->last_stun_buf()->Data(),
-                           ice_lite_port->last_stun_buf()->Length());
+                           ice_lite_port->last_stun_buf()->Length(),
+                           talk_base::PacketTime());
   // Verifying full mode connection becomes writable from the response.
   EXPECT_EQ_WAIT(Connection::STATE_WRITABLE, ch1.conn()->write_state(),
                  kTimeout);
@@ -2284,4 +2430,60 @@ TEST_F(PortTest, TestIceLiteConnectivity) {
   msg = ice_full_port->last_stun_msg();
   EXPECT_TRUE(msg->GetByteString(STUN_ATTR_USE_CANDIDATE) != NULL);
   ch1.Stop();
+}
+
+// This test case verifies that the CONTROLLING port does not time out.
+TEST_F(PortTest, TestControllingNoTimeout) {
+  SetIceProtocolType(cricket::ICEPROTO_RFC5245);
+  UDPPort* port1 = CreateUdpPort(kLocalAddr1);
+  ConnectToSignalDestroyed(port1);
+  port1->set_timeout_delay(10);  // milliseconds
+  port1->SetIceRole(cricket::ICEROLE_CONTROLLING);
+  port1->SetIceTiebreaker(kTiebreaker1);
+
+  UDPPort* port2 = CreateUdpPort(kLocalAddr2);
+  port2->SetIceRole(cricket::ICEROLE_CONTROLLED);
+  port2->SetIceTiebreaker(kTiebreaker2);
+
+  // Set up channels and ensure both ports will be deleted.
+  TestChannel ch1(port1, port2);
+  TestChannel ch2(port2, port1);
+
+  // Simulate a connection that succeeds, and then is destroyed.
+  ConnectAndDisconnectChannels(&ch1, &ch2);
+
+  // After the connection is destroyed, the port should not be destroyed.
+  talk_base::Thread::Current()->ProcessMessages(kTimeout);
+  EXPECT_FALSE(destroyed());
+}
+
+// This test case verifies that the CONTROLLED port does time out, but only
+// after connectivity is lost.
+TEST_F(PortTest, TestControlledTimeout) {
+  SetIceProtocolType(cricket::ICEPROTO_RFC5245);
+  UDPPort* port1 = CreateUdpPort(kLocalAddr1);
+  port1->SetIceRole(cricket::ICEROLE_CONTROLLING);
+  port1->SetIceTiebreaker(kTiebreaker1);
+
+  UDPPort* port2 = CreateUdpPort(kLocalAddr2);
+  ConnectToSignalDestroyed(port2);
+  port2->set_timeout_delay(10);  // milliseconds
+  port2->SetIceRole(cricket::ICEROLE_CONTROLLED);
+  port2->SetIceTiebreaker(kTiebreaker2);
+
+  // The connection must not be destroyed before a connection is attempted.
+  EXPECT_FALSE(destroyed());
+
+  port1->set_component(cricket::ICE_CANDIDATE_COMPONENT_DEFAULT);
+  port2->set_component(cricket::ICE_CANDIDATE_COMPONENT_DEFAULT);
+
+  // Set up channels and ensure both ports will be deleted.
+  TestChannel ch1(port1, port2);
+  TestChannel ch2(port2, port1);
+
+  // Simulate a connection that succeeds, and then is destroyed.
+  ConnectAndDisconnectChannels(&ch1, &ch2);
+
+  // The controlled port should be destroyed after 10 milliseconds.
+  EXPECT_TRUE_WAIT(destroyed(), kTimeout);
 }

@@ -107,7 +107,7 @@ NATServer::~NATServer() {
 
 void NATServer::OnInternalPacket(
     AsyncPacketSocket* socket, const char* buf, size_t size,
-    const SocketAddress& addr) {
+    const SocketAddress& addr, const PacketTime& packet_time) {
 
   // Read the intended destination from the wire.
   SocketAddress dest_addr;
@@ -126,13 +126,13 @@ void NATServer::OnInternalPacket(
   iter->second->WhitelistInsert(dest_addr);
 
   // Send the packet to its intended destination.
-  iter->second->socket->SendTo(buf + length, size - length, dest_addr,
-                               DSCP_NO_CHANGE);
+  talk_base::PacketOptions options;
+  iter->second->socket->SendTo(buf + length, size - length, dest_addr, options);
 }
 
 void NATServer::OnExternalPacket(
     AsyncPacketSocket* socket, const char* buf, size_t size,
-    const SocketAddress& remote_addr) {
+    const SocketAddress& remote_addr, const PacketTime& packet_time) {
 
   SocketAddress local_addr = socket->GetLocalAddress();
 
@@ -154,9 +154,10 @@ void NATServer::OnExternalPacket(
                                         size + kNATEncodedIPv6AddressSize,
                                         remote_addr);
   // Copy the data part after the address.
-  std::memcpy(real_buf.get() + addrlength, buf, size);
+  talk_base::PacketOptions options;
+  memcpy(real_buf.get() + addrlength, buf, size);
   server_socket_->SendTo(real_buf.get(), size + addrlength,
-                         iter->second->route.source(), DSCP_NO_CHANGE);
+                         iter->second->route.source(), options);
 }
 
 void NATServer::Translate(const SocketAddressPair& route) {

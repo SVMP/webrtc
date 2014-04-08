@@ -57,8 +57,6 @@ static const size_t kNonceSize = 40;
 static const size_t TURN_CHANNEL_HEADER_SIZE = 4U;
 
 // TODO(mallinath) - Move these to a common place.
-static const size_t kMaxPacketSize = 64 * 1024;
-
 inline bool IsTurnChannelData(uint16 msg_type) {
   // The first two bits of a channel data message are 0b01.
   return ((msg_type & 0xC000) == 0x4000);
@@ -109,7 +107,8 @@ class TurnServer::Allocation : public talk_base::MessageHandler,
 
   void OnExternalPacket(talk_base::AsyncPacketSocket* socket,
                         const char* data, size_t size,
-                        const talk_base::SocketAddress& addr);
+                        const talk_base::SocketAddress& addr,
+                        const talk_base::PacketTime& packet_time);
 
   static int ComputeLifetime(const TurnMessage* msg);
   bool HasPermission(const talk_base::IPAddress& addr);
@@ -280,7 +279,8 @@ void TurnServer::OnInternalSocketClose(talk_base::AsyncPacketSocket* socket,
 
 void TurnServer::OnInternalPacket(talk_base::AsyncPacketSocket* socket,
                                   const char* data, size_t size,
-                                  const talk_base::SocketAddress& addr) {
+                                  const talk_base::SocketAddress& addr,
+                                  const talk_base::PacketTime& packet_time) {
   // Fail if the packet is too small to even contain a channel header.
   if (size < TURN_CHANNEL_HEADER_SIZE) {
    return;
@@ -564,8 +564,8 @@ void TurnServer::SendStun(Connection* conn, StunMessage* msg) {
 
 void TurnServer::Send(Connection* conn,
                       const talk_base::ByteBuffer& buf) {
-  conn->socket()->SendTo(buf.Data(), buf.Length(), conn->src(),
-                         talk_base::DSCP_NO_CHANGE);
+  talk_base::PacketOptions options;
+  conn->socket()->SendTo(buf.Data(), buf.Length(), conn->src(), options);
 }
 
 void TurnServer::OnAllocationDestroyed(Allocation* allocation) {
@@ -838,7 +838,8 @@ void TurnServer::Allocation::HandleChannelData(const char* data, size_t size) {
 void TurnServer::Allocation::OnExternalPacket(
     talk_base::AsyncPacketSocket* socket,
     const char* data, size_t size,
-    const talk_base::SocketAddress& addr) {
+    const talk_base::SocketAddress& addr,
+    const talk_base::PacketTime& packet_time) {
   ASSERT(external_socket_.get() == socket);
   Channel* channel = FindChannel(addr);
   if (channel) {
@@ -937,7 +938,8 @@ void TurnServer::Allocation::SendErrorResponse(const TurnMessage* req, int code,
 
 void TurnServer::Allocation::SendExternal(const void* data, size_t size,
                                   const talk_base::SocketAddress& peer) {
-  external_socket_->SendTo(data, size, peer, talk_base::DSCP_NO_CHANGE);
+  talk_base::PacketOptions options;
+  external_socket_->SendTo(data, size, peer, options);
 }
 
 void TurnServer::Allocation::OnMessage(talk_base::Message* msg) {

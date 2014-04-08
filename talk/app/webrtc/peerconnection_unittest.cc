@@ -40,6 +40,7 @@
 #include "talk/app/webrtc/peerconnectioninterface.h"
 #include "talk/app/webrtc/test/fakeaudiocapturemodule.h"
 #include "talk/app/webrtc/test/fakeconstraints.h"
+#include "talk/app/webrtc/test/fakedtlsidentityservice.h"
 #include "talk/app/webrtc/test/fakevideotrackrenderer.h"
 #include "talk/app/webrtc/test/fakeperiodicvideocapturer.h"
 #include "talk/app/webrtc/test/mockpeerconnectionobservers.h"
@@ -78,6 +79,7 @@ using webrtc::MockCreateSessionDescriptionObserver;
 using webrtc::MockDataChannelObserver;
 using webrtc::MockSetSessionDescriptionObserver;
 using webrtc::MockStatsObserver;
+using webrtc::PeerConnectionInterface;
 using webrtc::SessionDescriptionInterface;
 using webrtc::StreamCollectionInterface;
 
@@ -327,7 +329,8 @@ class PeerConnectionTestClientBase
   int GetAudioOutputLevelStats(webrtc::MediaStreamTrackInterface* track) {
     talk_base::scoped_refptr<MockStatsObserver>
         observer(new talk_base::RefCountedObject<MockStatsObserver>());
-    EXPECT_TRUE(peer_connection_->GetStats(observer, track));
+    EXPECT_TRUE(peer_connection_->GetStats(
+        observer, track, PeerConnectionInterface::kStatsOutputLevelStandard));
     EXPECT_TRUE_WAIT(observer->called(), kMaxWaitMs);
     return observer->AudioOutputLevel();
   }
@@ -335,7 +338,8 @@ class PeerConnectionTestClientBase
   int GetAudioInputLevelStats() {
     talk_base::scoped_refptr<MockStatsObserver>
         observer(new talk_base::RefCountedObject<MockStatsObserver>());
-    EXPECT_TRUE(peer_connection_->GetStats(observer, NULL));
+    EXPECT_TRUE(peer_connection_->GetStats(
+        observer, NULL, PeerConnectionInterface::kStatsOutputLevelStandard));
     EXPECT_TRUE_WAIT(observer->called(), kMaxWaitMs);
     return observer->AudioInputLevel();
   }
@@ -343,7 +347,8 @@ class PeerConnectionTestClientBase
   int GetBytesReceivedStats(webrtc::MediaStreamTrackInterface* track) {
     talk_base::scoped_refptr<MockStatsObserver>
     observer(new talk_base::RefCountedObject<MockStatsObserver>());
-    EXPECT_TRUE(peer_connection_->GetStats(observer, track));
+    EXPECT_TRUE(peer_connection_->GetStats(
+        observer, track, PeerConnectionInterface::kStatsOutputLevelStandard));
     EXPECT_TRUE_WAIT(observer->called(), kMaxWaitMs);
     return observer->BytesReceived();
   }
@@ -351,7 +356,8 @@ class PeerConnectionTestClientBase
   int GetBytesSentStats(webrtc::MediaStreamTrackInterface* track) {
     talk_base::scoped_refptr<MockStatsObserver>
     observer(new talk_base::RefCountedObject<MockStatsObserver>());
-    EXPECT_TRUE(peer_connection_->GetStats(observer, track));
+    EXPECT_TRUE(peer_connection_->GetStats(
+        observer, track, PeerConnectionInterface::kStatsOutputLevelStandard));
     EXPECT_TRUE_WAIT(observer->called(), kMaxWaitMs);
     return observer->BytesSent();
   }
@@ -719,8 +725,19 @@ class JsepTestClient
     webrtc::PeerConnectionInterface::IceServer ice_server;
     ice_server.uri = "stun:stun.l.google.com:19302";
     ice_servers.push_back(ice_server);
+
+    // TODO(jiayl): we should always pass a FakeIdentityService so that DTLS
+    // is enabled by default like in Chrome (issue 2838).
+    FakeIdentityService* dtls_service = NULL;
+    bool dtls;
+    if (FindConstraint(constraints,
+                       MediaConstraintsInterface::kEnableDtlsSrtp,
+                       &dtls,
+                       NULL) && dtls) {
+      dtls_service = new FakeIdentityService();
+    }
     return peer_connection_factory()->CreatePeerConnection(
-        ice_servers, constraints, factory, NULL, this);
+        ice_servers, constraints, factory, dtls_service, this);
   }
 
   void HandleIncomingOffer(const std::string& msg) {
@@ -957,12 +974,13 @@ class P2PTestConductor : public testing::Test {
     }
 
     if (audio_frame_count != -1 || video_frame_count != -1) {
-      // Audio or video is expected to flow, so both sides should get to the
-      // Connected state.
+      // Audio or video is expected to flow, so both clients should reach the
+      // Connected state, and the offerer (ICE controller) should proceed to
+      // Completed.
       // Note: These tests have been observed to fail under heavy load at
       // shorter timeouts, so they may be flaky.
       EXPECT_EQ_WAIT(
-          webrtc::PeerConnectionInterface::kIceConnectionConnected,
+          webrtc::PeerConnectionInterface::kIceConnectionCompleted,
           initiating_client_->ice_connection_state(),
           kMaxWaitForFramesMs);
       EXPECT_EQ_WAIT(
@@ -1075,32 +1093,6 @@ TEST_F(JsepPeerConnectionP2PTestClient, LocalP2PTestDtlsRenegotiate) {
   LocalP2PTest();
   receiving_client()->SetReceiveAudioVideo(true, true);
   receiving_client()->Negotiate();
-}
-
-// This test sets up a call between an endpoint configured to use either SDES or
-// DTLS (the offerer) and just SDES (the answerer). As a result, SDES is used
-// instead of DTLS.
-TEST_F(JsepPeerConnectionP2PTestClient, LocalP2PTestOfferDtlsToSdes) {
-  MAYBE_SKIP_TEST(talk_base::SSLStreamAdapter::HaveDtlsSrtp);
-  FakeConstraints setup_constraints;
-  setup_constraints.AddMandatory(MediaConstraintsInterface::kEnableDtlsSrtp,
-                                 true);
-  ASSERT_TRUE(CreateTestClients(&setup_constraints, NULL));
-  LocalP2PTest();
-  VerifyRenderedSize(640, 480);
-}
-
-// This test sets up a call between an endpoint configured to use SDES
-// (the offerer) and either SDES or DTLS (the answerer). As a result, SDES is
-// used instead of DTLS.
-TEST_F(JsepPeerConnectionP2PTestClient, LocalP2PTestOfferSdesToDtls) {
-  MAYBE_SKIP_TEST(talk_base::SSLStreamAdapter::HaveDtlsSrtp);
-  FakeConstraints setup_constraints;
-  setup_constraints.AddMandatory(MediaConstraintsInterface::kEnableDtlsSrtp,
-                                 true);
-  ASSERT_TRUE(CreateTestClients(NULL, &setup_constraints));
-  LocalP2PTest();
-  VerifyRenderedSize(640, 480);
 }
 
 // This test sets up a call between two endpoints that are configured to use
@@ -1257,7 +1249,12 @@ TEST_F(JsepPeerConnectionP2PTestClient, GetBytesSentStats) {
 }
 
 // This test sets up a call between two parties with audio, video and data.
+// TODO(jiayl): fix the flakiness on Windows and reenable. Issue 2891.
+#if defined(WIN32)
+TEST_F(JsepPeerConnectionP2PTestClient, DISABLED_LocalP2PTestDataChannel) {
+#else
 TEST_F(JsepPeerConnectionP2PTestClient, LocalP2PTestDataChannel) {
+#endif
   FakeConstraints setup_constraints;
   setup_constraints.SetAllowRtpDataChannels();
   ASSERT_TRUE(CreateTestClients(&setup_constraints, &setup_constraints));

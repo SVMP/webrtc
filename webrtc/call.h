@@ -7,8 +7,8 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef WEBRTC_VIDEO_ENGINE_NEW_INCLUDE_CALL_H_
-#define WEBRTC_VIDEO_ENGINE_NEW_INCLUDE_CALL_H_
+#ifndef WEBRTC_CALL_H_
+#define WEBRTC_CALL_H_
 
 #include <string>
 #include <vector>
@@ -31,6 +31,19 @@ class PacketReceiver {
   virtual ~PacketReceiver() {}
 };
 
+// Callback interface for reporting when a system overuse is detected.
+// The detection is based on the jitter of incoming captured frames.
+class OveruseCallback {
+ public:
+  // Called as soon as an overuse is detected.
+  virtual void OnOveruse() = 0;
+  // Called periodically when the system is not overused any longer.
+  virtual void OnNormalUse() = 0;
+
+ protected:
+  virtual ~OveruseCallback() {}
+};
+
 // A Call instance can contain several send and/or receive streams. All streams
 // are assumed to have the same remote endpoint and will share bitrate estimates
 // etc.
@@ -38,41 +51,46 @@ class Call {
  public:
   struct Config {
     explicit Config(newapi::Transport* send_transport)
-        : send_transport(send_transport),
-          overuse_detection(false),
+        : webrtc_config(NULL),
+          send_transport(send_transport),
           voice_engine(NULL),
           trace_callback(NULL),
-          trace_filter(kTraceDefault) {}
+          trace_filter(kTraceDefault),
+          overuse_callback(NULL) {}
+
+    webrtc::Config* webrtc_config;
 
     newapi::Transport* send_transport;
-    bool overuse_detection;
 
     // VoiceEngine used for audio/video synchronization for this Call.
     VoiceEngine* voice_engine;
 
     TraceCallback* trace_callback;
     uint32_t trace_filter;
+
+    // Callback for overuse and normal usage based on the jitter of incoming
+    // captured frames. 'NULL' disables the callback.
+    OveruseCallback* overuse_callback;
   };
 
   static Call* Create(const Call::Config& config);
 
-  virtual std::vector<VideoCodec> GetVideoCodecs() = 0;
+  static Call* Create(const Call::Config& config,
+                      const webrtc::Config& webrtc_config);
 
   virtual VideoSendStream::Config GetDefaultSendConfig() = 0;
 
-  virtual VideoSendStream* CreateSendStream(
+  virtual VideoSendStream* CreateVideoSendStream(
       const VideoSendStream::Config& config) = 0;
 
-  // Returns the internal state of the send stream, for resume sending with a
-  // new stream with different settings.
-  // Note: Only the last returned send-stream state is valid.
-  virtual SendStreamState* DestroySendStream(VideoSendStream* send_stream) = 0;
+  virtual void DestroyVideoSendStream(VideoSendStream* send_stream) = 0;
 
   virtual VideoReceiveStream::Config GetDefaultReceiveConfig() = 0;
 
-  virtual VideoReceiveStream* CreateReceiveStream(
+  virtual VideoReceiveStream* CreateVideoReceiveStream(
       const VideoReceiveStream::Config& config) = 0;
-  virtual void DestroyReceiveStream(VideoReceiveStream* receive_stream) = 0;
+  virtual void DestroyVideoReceiveStream(
+      VideoReceiveStream* receive_stream) = 0;
 
   // All received RTP and RTCP packets for the call should be inserted to this
   // PacketReceiver. The PacketReceiver pointer is valid as long as the
@@ -91,4 +109,4 @@ class Call {
 };
 }  // namespace webrtc
 
-#endif  // WEBRTC_VIDEO_ENGINE_NEW_INCLUDE_CALL_H_
+#endif  // WEBRTC_CALL_H_

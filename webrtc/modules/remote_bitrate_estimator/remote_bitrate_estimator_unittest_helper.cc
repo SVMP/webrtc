@@ -341,9 +341,14 @@ void RemoteBitrateEstimatorTest::InitialBehaviorTestHelper(
   EXPECT_TRUE(bitrate_observer_->updated());
   bitrate_observer_->Reset();
   EXPECT_EQ(bitrate_observer_->latest_bitrate(), bitrate_bps);
+  bitrate_estimator_->RemoveStream(kDefaultSsrc);
+  EXPECT_TRUE(bitrate_estimator_->LatestEstimate(&ssrcs, &bitrate_bps));
+  ASSERT_EQ(0u, ssrcs.size());
+  EXPECT_EQ(0u, bitrate_bps);
 }
 
-void RemoteBitrateEstimatorTest::RateIncreaseReorderingTestHelper() {
+void RemoteBitrateEstimatorTest::RateIncreaseReorderingTestHelper(
+    uint32_t expected_bitrate_bps) {
   const int kFramerate = 50;  // 50 fps to avoid rounding errors.
   const int kFrameIntervalMs = 1000 / kFramerate;
   const uint32_t kFrameIntervalAbsSendTime = AbsSendTime(1, kFramerate);
@@ -364,7 +369,7 @@ void RemoteBitrateEstimatorTest::RateIncreaseReorderingTestHelper() {
   }
   bitrate_estimator_->Process();
   EXPECT_TRUE(bitrate_observer_->updated());
-  EXPECT_EQ(498136u, bitrate_observer_->latest_bitrate());
+  EXPECT_EQ(expected_bitrate_bps, bitrate_observer_->latest_bitrate());
   for (int i = 0; i < 10; ++i) {
     clock_.AdvanceTimeMilliseconds(2 * kFrameIntervalMs);
     timestamp += 2 * 90 * kFrameIntervalMs;
@@ -379,7 +384,7 @@ void RemoteBitrateEstimatorTest::RateIncreaseReorderingTestHelper() {
   }
   bitrate_estimator_->Process();
   EXPECT_TRUE(bitrate_observer_->updated());
-  EXPECT_EQ(498136u, bitrate_observer_->latest_bitrate());
+  EXPECT_EQ(expected_bitrate_bps, bitrate_observer_->latest_bitrate());
 }
 
 // Make sure we initially increase the bitrate as expected.
@@ -486,5 +491,21 @@ void RemoteBitrateEstimatorTest::CapacityDropTestHelper(
 
   EXPECT_EQ(expected_bitrate_drop_delta,
             bitrate_drop_time - overuse_start_time);
+
+  // Remove stream one by one.
+  unsigned int latest_bps = 0;
+  std::vector<unsigned int> ssrcs;
+  for (int i = 0; i < number_of_streams; i++) {
+    EXPECT_TRUE(bitrate_estimator_->LatestEstimate(&ssrcs, &latest_bps));
+    EXPECT_EQ(number_of_streams - i, static_cast<int>(ssrcs.size()));
+    EXPECT_EQ(bitrate_bps, latest_bps);
+    for (int j = i; j < number_of_streams; j++) {
+      EXPECT_EQ(kDefaultSsrc + j, ssrcs[j - i]);
+    }
+    bitrate_estimator_->RemoveStream(kDefaultSsrc + i);
+  }
+  EXPECT_TRUE(bitrate_estimator_->LatestEstimate(&ssrcs, &latest_bps));
+  EXPECT_EQ(0u, ssrcs.size());
+  EXPECT_EQ(0u, latest_bps);
 }
 }  // namespace webrtc

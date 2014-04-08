@@ -1,6 +1,7 @@
 var localVideo;
 var miniVideo;
 var remoteVideo;
+var hasLocalStream;
 var localStream;
 var remoteStream;
 var channel;
@@ -20,6 +21,7 @@ var isVideoMuted = false;
 var isAudioMuted = false;
 // Types of gathered ICE Candidates.
 var gatheredIceCandidateTypes = { Local: {}, Remote: {} };
+var infoDivErrors = [];
 
 function initialize() {
   if (errorMessages.length > 0) {
@@ -42,9 +44,18 @@ function initialize() {
   // changing here.
   openChannel();
   maybeRequestTurn();
-  doGetUserMedia();
+
   // Caller is always ready to create peerConnection.
   signalingReady = initiator;
+
+  if (mediaConstraints.audio === false &&
+      mediaConstraints.video === false) {
+    hasLocalStream = false;
+    maybeStart();
+  } else {
+    hasLocalStream = true;
+    doGetUserMedia();
+  }
 }
 
 function openChannel() {
@@ -60,15 +71,14 @@ function openChannel() {
 }
 
 function maybeRequestTurn() {
-  // Skipping TURN Http request for Firefox version <=22.
-  // Firefox does not support TURN for version <=22.
-  if (webrtcDetectedBrowser === 'firefox' && webrtcDetectedVersion <=22) {
+  // Allow to skip turn by passing ts=false to apprtc.
+  if (turnUrl == '') {
     turnDone = true;
     return;
   }
 
   for (var i = 0, len = pcConfig.iceServers.length; i < len; i++) {
-    if (pcConfig.iceServers[i].url.substr(0, 5) === 'turn:') {
+    if (pcConfig.iceServers[i].urls.substr(0, 5) === 'turn:') {
       turnDone = true;
       return;
     }
@@ -95,17 +105,17 @@ function onTurnResult() {
 
   if (xmlhttp.status === 200) {
     var turnServer = JSON.parse(xmlhttp.responseText);
-    for (i = 0; i < turnServer.uris.length; i++) {
-      // Create a turnUri using the polyfill (adapter.js).
-      var iceServer = createIceServer(turnServer.uris[i],
+    // Create turnUris using the polyfill (adapter.js).
+    var iceServers = createIceServers(turnServer.uris,
                                       turnServer.username,
                                       turnServer.password);
-      if (iceServer !== null) {
-        pcConfig.iceServers.push(iceServer);
-      }
+    if (iceServers !== null) {
+      pcConfig.iceServers = pcConfig.iceServers.concat(iceServers);
     }
   } else {
-    console.log('Request for TURN server failed.');
+    messageError('No TURN server; unlikely that media will traverse networks.  '
+                 + 'If this persists please report it to '
+                 + 'discuss-webrtc@googlegroups.com.');
   }
   // If TURN request failed, continue the call with default STUN.
   turnDone = true;
@@ -130,7 +140,7 @@ function doGetUserMedia() {
                 '  \'' + JSON.stringify(mediaConstraints) + '\'');
   } catch (e) {
     alert('getUserMedia() failed. Is this a WebRTC capable browser?');
-    console.log('getUserMedia failed with exception: ' + e.message);
+    messageError('getUserMedia failed with exception: ' + e.message);
   }
 }
 
@@ -143,10 +153,10 @@ function createPeerConnection() {
                 '  config: \'' + JSON.stringify(pcConfig) + '\';\n' +
                 '  constraints: \'' + JSON.stringify(pcConstraints) + '\'.');
   } catch (e) {
-    console.log('Failed to create PeerConnection, exception: ' + e.message);
+    messageError('Failed to create PeerConnection, exception: ' + e.message);
     alert('Cannot create RTCPeerConnection object; \
           WebRTC is not supported by this browser.');
-      return;
+    return;
   }
   pc.onaddstream = onRemoteStreamAdded;
   pc.onremovestream = onRemoteStreamRemoved;
@@ -155,13 +165,18 @@ function createPeerConnection() {
 }
 
 function maybeStart() {
-  if (!started && signalingReady &&
-      localStream && channelReady && turnDone) {
+  if (!started && signalingReady && channelReady && turnDone &&
+      (localStream || !hasLocalStream)) {
     setStatus('Connecting...');
     console.log('Creating PeerConnection.');
     createPeerConnection();
-    console.log('Adding local stream.');
-    pc.addStream(localStream);
+
+    if (hasLocalStream) {
+      console.log('Adding local stream.');
+      pc.addStream(localStream);
+    } else {
+      console.log('Not sending any stream.');
+    }
     started = true;
 
     if (initiator)
@@ -218,7 +233,19 @@ function setRemote(message) {
     message.sdp = addStereo(message.sdp);
   message.sdp = maybePreferAudioSendCodec(message.sdp);
   pc.setRemoteDescription(new RTCSessionDescription(message),
-       onSetSessionDescriptionSuccess, onSetSessionDescriptionError);
+       onSetRemoteDescriptionSuccess, onSetSessionDescriptionError);
+
+  function onSetRemoteDescriptionSuccess() {
+    console.log("Set remote session description success.");
+    // By now all addstream events for the setRemoteDescription have fired.
+    // So we can know if the peer is sending any stream or is only receiving.
+    if (remoteStream) {
+      waitForRemoteVideo();
+    } else {
+      console.log("Not receiving any stream.");
+      transitionToActive();
+    }
+  }
 }
 
 function sendMessage(message) {
@@ -234,7 +261,7 @@ function sendMessage(message) {
 
 function processSignalingMessage(message) {
   if (!started) {
-    console.log('peerConnection has not been created yet!');
+    messageError('peerConnection has not been created yet!');
     return;
   }
 
@@ -247,10 +274,19 @@ function processSignalingMessage(message) {
     var candidate = new RTCIceCandidate({sdpMLineIndex: message.label,
                                          candidate: message.candidate});
     noteIceCandidate("Remote", iceCandidateType(message.candidate));
-    pc.addIceCandidate(candidate);
+    pc.addIceCandidate(candidate,
+                       onAddIceCandidateSuccess, onAddIceCandidateError);
   } else if (message.type === 'bye') {
     onRemoteHangup();
   }
+}
+
+function onAddIceCandidateSuccess() {
+  console.log('AddIceCandidate success.');
+}
+
+function onAddIceCandidateError(error) {
+  messageError('Failed to add Ice Candidate: ' + error.toString());
 }
 
 function onChannelOpened() {
@@ -258,6 +294,7 @@ function onChannelOpened() {
   channelReady = true;
   maybeStart();
 }
+
 function onChannelMessage(message) {
   console.log('S->C: ' + message.data);
   var msg = JSON.parse(message.data);
@@ -279,11 +316,19 @@ function onChannelMessage(message) {
     processSignalingMessage(msg);
   }
 }
+
 function onChannelError() {
-  console.log('Channel error.');
+  messageError('Channel error.');
 }
+
 function onChannelClosed() {
   console.log('Channel closed.');
+}
+
+function messageError(msg) {
+  console.log(msg);
+  infoDivErrors.push(msg);
+  updateInfoDiv();
 }
 
 function onUserMediaSuccess(stream) {
@@ -297,14 +342,17 @@ function onUserMediaSuccess(stream) {
 }
 
 function onUserMediaError(error) {
-  console.log('Failed to get access to local media. Error code was ' +
-              error.code);
+  messageError('Failed to get access to local media. Error code was ' +
+               error.code + '. Continuing without sending a stream.');
   alert('Failed to get access to local media. Error code was ' +
-        error.code + '.');
+        error.code + '. Continuing without sending a stream.');
+
+  hasLocalStream = false;
+  maybeStart();
 }
 
 function onCreateSessionDescriptionError(error) {
-  console.log('Failed to create session description: ' + error.toString());
+  messageError('Failed to create session description: ' + error.toString());
 }
 
 function onSetSessionDescriptionSuccess() {
@@ -312,7 +360,7 @@ function onSetSessionDescriptionSuccess() {
 }
 
 function onSetSessionDescriptionError(error) {
-  console.log('Failed to set session description: ' + error.toString());
+  messageError('Failed to set session description: ' + error.toString());
 }
 
 function iceCandidateType(candidateSDP) {
@@ -339,10 +387,8 @@ function onIceCandidate(event) {
 
 function onRemoteStreamAdded(event) {
   console.log('Remote stream added.');
-  reattachMediaStream(miniVideo, localVideo);
   attachMediaStream(remoteVideo, event.stream);
   remoteStream = event.stream;
-  waitForRemoteVideo();
 }
 
 function onRemoteStreamRemoved(event) {
@@ -380,6 +426,7 @@ function stop() {
   isVideoMuted = false;
   pc.close();
   pc = null;
+  remoteStream = null;
   msgQueue.length = 0;
 }
 
@@ -394,6 +441,7 @@ function waitForRemoteVideo() {
 }
 
 function transitionToActive() {
+  reattachMediaStream(miniVideo, localVideo);
   remoteVideo.style.opacity = 1;
   card.style.webkitTransform = 'rotateY(180deg)';
   setTimeout(function() { localVideo.src = ''; }, 500);
@@ -454,15 +502,27 @@ function updateInfoDiv() {
   }
   var div = getInfoDiv();
   div.innerHTML = contents + "</pre>";
+
+  for (var msg in infoDivErrors) {
+    div.innerHTML += '<p style="background-color: red; color: yellow;">' +
+                     infoDivErrors[msg] + '</p>';
+  }
+  if (infoDivErrors.length)
+    showInfoDiv();
 }
 
-function toggleInfoDivDisplay() {
+function toggleInfoDiv() {
   var div = getInfoDiv();
   if (div.style.display == "block") {
     div.style.display = "none";
   } else {
-    div.style.display = "block";
+    showInfoDiv();
   }
+}
+
+function showInfoDiv() {
+  var div = getInfoDiv();
+  div.style.display = "block";
 }
 
 function toggleVideoMute() {
@@ -533,7 +593,7 @@ document.onkeydown = function(event) {
       toggleVideoMute();
       return false;
     case 73:
-      toggleInfoDivDisplay();
+      toggleInfoDiv();
       return false;
     default:
       return;

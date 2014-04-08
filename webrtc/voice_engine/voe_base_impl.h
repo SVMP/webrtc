@@ -39,6 +39,7 @@ public:
     virtual int Terminate();
 
     virtual int CreateChannel();
+    virtual int CreateChannel(const Config& config);
 
     virtual int DeleteChannel(int channel);
 
@@ -68,6 +69,8 @@ public:
 
     virtual int LastError();
 
+    virtual AudioTransport* audio_transport() { return this; }
+
     // AudioTransport
     virtual int32_t
         RecordedDataIsAvailable(const void* audioSamples,
@@ -77,7 +80,7 @@ public:
                                 uint32_t samplesPerSec,
                                 uint32_t totalDelayMS,
                                 int32_t clockDrift,
-                                uint32_t currentMicLevel,
+                                uint32_t micLevel,
                                 bool keyPressed,
                                 uint32_t& newMicLevel);
 
@@ -95,9 +98,13 @@ public:
                                 int number_of_channels,
                                 int number_of_frames,
                                 int audio_delay_milliseconds,
-                                int current_volume,
+                                int volume,
                                 bool key_pressed,
                                 bool need_audio_processing);
+
+    virtual void OnData(int voe_channel, const void* audio_data,
+                        int bits_per_sample, int sample_rate,
+                        int number_of_channels, int number_of_frames);
 
     // AudioDeviceObserver
     virtual void OnErrorIsReported(ErrorCode error);
@@ -128,11 +135,15 @@ private:
                                    uint32_t number_of_frames,
                                    uint32_t audio_delay_milliseconds,
                                    int32_t clock_drift,
-                                   uint32_t current_volume,
+                                   uint32_t volume,
                                    bool key_pressed);
 
     int32_t AddBuildInfo(char* str) const;
     int32_t AddVoEVersion(char* str) const;
+
+    // Initialize channel by setting Engine Information then initializing
+    // channel.
+    int InitializeChannel(voe::ChannelOwner* channel_owner);
 #ifdef WEBRTC_EXTERNAL_TRANSPORT
     int32_t AddExternalTransportBuild(char* str) const;
 #endif
@@ -143,8 +154,6 @@ private:
     CriticalSectionWrapper& _callbackCritSect;
 
     bool _voiceEngineObserver;
-    uint32_t _oldVoEMicLevel;
-    uint32_t _oldMicLevel;
     AudioFrame _audioFrame;
     voe::SharedData* _shared;
 };
