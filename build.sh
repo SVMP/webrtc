@@ -1,6 +1,11 @@
 #!/bin/bash
 #gclient sync --nohooks
 source build_functions.sh
+STRIP=`pwd`/third_party/android_tools/ndk/toolchains/x86-4.7/prebuilt/linux-x86_64/bin/i686-linux-android-strip
+
+echo preparing for x86 arch.
+cp mitrebuild/common.gypi build/common.gypi
+
 
 config() {
 	export PATH=$PATH:../depot_tools
@@ -34,4 +39,4 @@ ninja -C out/Debug -j 4 libjingle_peerconnection_jar
 # This is what needs to go to AOSP build.
 #strip out/Release/libjingle_peerconnection_so.so
 cp out/Debug/libjingle_peerconnection_so.so out/Debug/libjingle_peerconnection_so_dbg.so
-strip out/Debug/libjingle_peerconnection_so.so
+$STRIP out/Debug/libjingle_peerconnection_so.so

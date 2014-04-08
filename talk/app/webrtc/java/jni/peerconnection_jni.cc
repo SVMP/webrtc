@@ -1754,11 +1754,7 @@ extern "C" jint JNIEXPORT JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved) {
 }
 
 extern "C" void JNIEXPORT JNICALL JNI_OnUnLoad(JavaVM *jvm, void *reserved) {
-<<<<<<< HEAD
-  //webrtc::Trace::ReturnTrace();
-=======
   g_class_reference_holder->FreeReferences(AttachCurrentThreadIfNeeded());
->>>>>>> v3.52
   delete g_class_reference_holder;
   g_class_reference_holder = NULL;
   CHECK(talk_base::CleanupSSL(), "Failed to CleanupSSL()");

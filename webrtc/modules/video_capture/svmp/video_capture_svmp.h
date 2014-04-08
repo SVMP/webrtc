@@ -13,7 +13,7 @@
 
 
 
-#include "common_types.h"
+//#include "common_types.h"
 #include "../video_capture_impl.h"
 
 // Android stuff

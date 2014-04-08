@@ -579,14 +579,6 @@ bool WebRtcSession::Initialize(
   }
 
   if (FindConstraint(
-        constraints,
-        MediaConstraintsInterface::kHighStartBitrate,
-        &value,
-        NULL)) {
-    video_options_.video_start_bitrate.Set(cricket::kHighStartBitrate);
-  }
-
-  if (FindConstraint(
       constraints,
       MediaConstraintsInterface::kVeryHighBitrate,
       &value,
@@ -600,7 +592,6 @@ bool WebRtcSession::Initialize(
       NULL)) {
     video_options_.video_highest_bitrate.Set(
         cricket::VideoOptions::HIGH);
->>>>>>> v3.52
   }
 
   const cricket::VideoCodec default_codec(

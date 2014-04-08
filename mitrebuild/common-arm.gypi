@@ -124,7 +124,7 @@
             }],
 
             ['OS=="android"', {
-              'target_arch%': 'ia32',
+              'target_arch%': 'arm',
             }, {
               # Default architecture we're building for is the architecture we're
               # building on, and possibly sub-architecture (for iOS builds).
