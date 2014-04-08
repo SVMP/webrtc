@@ -376,13 +376,16 @@ VideoChannel* ChannelManager::CreateVideoChannel_w(
       // voice_channel can be NULL in case of NullVoiceEngine.
       media_engine_->CreateVideoChannel(voice_channel ?
           voice_channel->media_channel() : NULL);
-  if (media_channel == NULL)
+  if (media_channel == NULL){
+    LOG(LS_ERROR) << "media_channel_w: media_channel == NULL";
     return NULL;
+  }
 
   VideoChannel* video_channel = new VideoChannel(
       worker_thread_, media_engine_.get(), media_channel,
       session, content_name, rtcp, voice_channel);
   if (!video_channel->Init()) {
+    LOG(LS_ERROR) << "media_channel_w: video_channel->Init() failed";
     delete video_channel;
     return NULL;
   }

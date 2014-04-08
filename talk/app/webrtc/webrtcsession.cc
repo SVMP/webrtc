@@ -273,12 +273,14 @@ static bool BadSdp(const std::string& desc, std::string* err_desc) {
 static bool BadLocalSdp(const std::string& desc, std::string* err_desc) {
   std::string set_local_sdp_failed = kSetLocalSdpFailed;
   set_local_sdp_failed.append(desc);
+  LOG(LS_ERROR) << "Bad LocalSdP: ";
   return BadSdp(set_local_sdp_failed, err_desc);
 }
 
 static bool BadRemoteSdp(const std::string& desc, std::string* err_desc) {
   std::string set_remote_sdp_failed = kSetRemoteSdpFailed;
   set_remote_sdp_failed.append(desc);
+  LOG(LS_ERROR) << "Bad RemoteSdP: desc: "<< desc << " er_desc: " << err_desc;
   return BadSdp(set_remote_sdp_failed, err_desc);
 }
 
@@ -499,6 +501,10 @@ bool WebRtcSession::Initialize(
         constraints,
         MediaConstraintsInterface::kEnableDscp,
         &value, NULL)) {
+      if (value)
+           LOG(LS_WARNING) << "dscp_enabled";
+      else
+          LOG(LS_WARNING) << "dscp_disabled";
     dscp_enabled_ = value;
   }
 
@@ -664,6 +670,7 @@ bool WebRtcSession::SetRemoteDescription(SessionDescriptionInterface* desc,
   if (action == kOffer && !CreateChannels(desc->description())) {
     // TODO(mallinath) - Handle CreateChannel failure, as new local description
     // is applied. Restore back to old description.
+    LOG(LS_ERROR) << "Unable to create channels.. BadRemoteSdp() ";
     return BadRemoteSdp(kCreateChannelFailed, err_desc);
   }
 
@@ -1305,6 +1312,7 @@ void WebRtcSession::RemoveUnusedChannelsAndTransports(
     mediastream_signaling_->OnAudioChannelClose();
     SignalVoiceChannelDestroyed();
     const std::string content_name = voice_channel_->content_name();
+    LOG(LS_WARNING) << "destroying voice_channel";
     channel_manager_->DestroyVoiceChannel(voice_channel_.release());
     DestroyTransportProxy(content_name);
   }
@@ -1372,8 +1380,10 @@ bool WebRtcSession::CreateChannels(const SessionDescription* desc) {
 bool WebRtcSession::CreateVoiceChannel(const cricket::ContentInfo* content) {
   voice_channel_.reset(channel_manager_->CreateVoiceChannel(
       this, content->name, true));
-  if (!voice_channel_.get())
+  if (!voice_channel_.get()){
+      LOG(LS_ERROR) << "Failed to create Voice Channel";
     return false;
+  }
 
   if (dscp_enabled_) {
     cricket::AudioOptions options;
@@ -1384,8 +1394,19 @@ bool WebRtcSession::CreateVoiceChannel(const cricket::ContentInfo* content) {
 }
 
 bool WebRtcSession::CreateVideoChannel(const cricket::ContentInfo* content) {
-  video_channel_.reset(channel_manager_->CreateVideoChannel(
-      this, content->name, true, voice_channel_.get()));
+  
+    if (!voice_channel_.get()){
+        LOG(LS_ERROR) << "invalid voice channel";
+        
+    }
+    
+    cricket::VideoChannel *video_channel_tmp = channel_manager_->CreateVideoChannel(
+      this, content->name, true, voice_channel_.get());
+    
+    video_channel_.reset(video_channel_tmp);
+// tmp
+// return video_channel_ ? true : false;
+  
   if (!video_channel_.get())
     return false;
 
@@ -1485,10 +1506,12 @@ bool WebRtcSession::ValidateSessionDescription(
     if (!ExpectSetLocalDescription(action))
       return BadSdp(source, BadStateErrMsg(type, state()), error_desc);
   } else {
-    if (!ExpectSetRemoteDescription(action))
+    if (!ExpectSetRemoteDescription(action)){
+      LOG(LS_ERROR) << "SetRemoteDescription: state error\n";
       return BadSdp(source, BadStateErrMsg(type, state()), error_desc);
+    }
   }
-
+  
   // Verify crypto settings.
   std::string crypto_error;
   if (webrtc_session_desc_factory_->secure() == cricket::SEC_REQUIRED &&
