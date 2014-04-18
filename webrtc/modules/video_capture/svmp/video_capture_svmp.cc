@@ -8,9 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#define LOG_TAG "fbstream_webrtc"
+
+
 
 #include "video_capture_android.h"
+
 
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -45,12 +47,6 @@ namespace android {
 
     void *MyEventReceiver::obj;
 
-    MyEventReceiver::MyEventReceiver() {
-    }
-
-    MyEventReceiver::~MyEventReceiver() {
-    }
-
     void MyEventReceiver::setCapture(void *myobj) {
         obj = myobj;
     }
@@ -59,14 +55,123 @@ namespace android {
         return static_cast<webrtc::videocapturemodule::VideoCaptureModuleV4L2*> (obj)->CaptureProcess();
     }
 
+    /* Vsync event handler:  */
+    int myLooperCallback::handleEvent(int fd, int events, void* data) {
+        // retrieve handle to videocapturemodule
+        MyEventReceiver* q = (MyEventReceiver*) data;
+        //LOGG("HandleEvent success");
+
+        ssize_t n;
+        MyEventReceiver::Event buffer[1];
+
+        while ((n = q->getEvents(buffer, 1)) > 0) {
+            for (int i = 0; i < n; i++) {
+                if (buffer[i].header.type == MyEventReceiver::DISPLAY_EVENT_VSYNC) {
+                    //q->doCapture();
+                }
+            }
+        }
+        if (n < 0) {
+            LOGG("error reading events (%s)\n", strerror(-n));
+        }
+
+        return 1;
+    }
+
+    void LooperHelper::Setup(void *myobj) {
+        if (_setup)
+            return;
+
+        LOGG("!! Setup");
+        mLooper = new Looper(false);
+        receiver = new myLooperCallback();
+        myDisplayEvent = new MyEventReceiver();
+        myDisplayEvent->setCapture(myobj);
+        // set rate to 30 hz ( skip every other event )
+        myDisplayEvent->setVsyncRate(2);
+
+        _fd = myDisplayEvent->getFd();
+
+        if (mLooper->addFd(_fd, ALOOPER_POLL_CALLBACK, ALOOPER_EVENT_INPUT, receiver,
+                myDisplayEvent) == 0)
+            LOGG("!! addFd() invalid arguments!!!");
+
+        _capturing = true;
+        _setup = true;
+
+    }
+
+    bool LooperHelper::loop() {
+        LOGG("about to pollOnce()");
+        if (_capturing) {
+            int32_t ret = mLooper->pollOnce(100);
+            LOGG("after pollOnce()");
+            switch (ret) {
+                case ALOOPER_POLL_WAKE:
+                    LOGG("ALOOPER_POLL_WAKE\n");
+                    break;
+                case ALOOPER_POLL_CALLBACK:
+                    // LOGG("ALOOPER_POLL_CALLBACK\n");
+                    goto success;
+                    break;
+                case ALOOPER_POLL_TIMEOUT:
+                    LOGG("ALOOPER_POLL_TIMEOUT\n");
+                    // timeout occured stop the loop;
+                    _capturing = false;
+                    break;
+                    // Looper is killed so exit 
+                case ALOOPER_POLL_ERROR:
+                    LOGG("ALOOPER_POLL_ERROR");
+                    // goto end;
+                    break;
+                default:
+                    LOGG("ugh? poll returned %d\n", ret);
+                    break;
+            }
+        } else
+            return false;
+
+
+        return false;
+success:
+        return true;
+    }
+
+    void LooperHelper::TearDown() {
+        LOGG("**TearDown start ");
+        mLooper->removeFd(_fd);
+        mLooper->wake();
+
+        sleep(1); // wait up until one sec for Looper to timeout.
+        LOGG("**TearDown done sleeping ");
+        delete myDisplayEvent;
+
+
+
+        mLooper.clear();
+        receiver.clear();
+
+        LOGG("**TearDown complete ");
+    }
+
 }
 
 namespace webrtc {
 
+
+#if defined(WEBRTC_ANDROID) && !defined(WEBRTC_CHROMIUM_BUILD)
+    // Put this in as a place holder. A handle to the JVM is not needed.
+
+    int32_t SetCaptureAndroidVM(JavaVM* javaVM) {
+        return 1;
+    }
+#endif
+
+
     namespace videocapturemodule {
 
         // static variables;
-        android::LooperHelper VideoCaptureModuleV4L2::Loop;
+        //android::LooperHelper VideoCaptureModuleV4L2::Loop;
 
         VideoCaptureModule* VideoCaptureImpl::Create(const int32_t id,
                 const char* deviceUniqueId) {
@@ -93,8 +198,7 @@ namespace webrtc {
         _currentFrameRate(-1),
         _captureStarted(false),
         _captureVideoType(kVideoRGB24), // default to virtual frame buffer
-        _pool(NULL)
- {
+        _pool(NULL) {
 
         }
 
@@ -189,7 +293,7 @@ namespace webrtc {
             memset(&video_fmt, 0, sizeof (struct v4l2_format));
             video_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
             video_fmt.fmt.pix.sizeimage = 0;
-            //video_fmt.fmt.pix.width = capability.width;
+
             video_fmt.fmt.pix.width = fb_data.var.xres;
             video_fmt.fmt.pix.height = fb_data.var.yres;
             video_fmt.fmt.pix.pixelformat = fmts[fmtsIdx];
@@ -241,12 +345,16 @@ namespace webrtc {
             //start capture thread;
             if (!_captureThread) {
                 _captureThread = ThreadWrapper::CreateThread(
-                        VideoCaptureModuleV4L2::CaptureThreadAsync, this, kHighPriority);
+                        VideoCaptureModuleV4L2::CaptureThread, this, kHighPriority);
+
                 unsigned int id;
                 _captureThread->Start(id);
 
             }
 
+            // Startup VSYNC Event Looper
+            Loop = new LooperHelper();
+            Loop->Setup(this);
             _captureStarted = true;
             return 0;
 
@@ -256,14 +364,28 @@ namespace webrtc {
         int32_t VideoCaptureModuleV4L2::StopCapture() {
 
             if (_captureThread) {
-                // Make sure the capture thread stop 
                 // Cleanup VSYNC polling thread first
                 CleanupCapture();
+                // Make sure the capture thread stops
                 _captureThread->SetNotAlive();
-                if (_captureThread->Stop()) {
+                LOGG("Stopping CaptureThread()");
+                int ret = _captureThread->Stop();
+                if (!ret)// try up to 5 times to kill it
+                    for (int i = 0; i < 5; i++)
+                        if (_captureThread->Stop()) {
+                            ret = 1;
+                            break;
+                        } else
+                            LOGG("failed _captureThread->Stop() trying again...");
+
+
+                if (ret) {
+                    LOGG("_captureThread stopped successfully");
                     delete _captureThread;
                     _captureThread = NULL;
                 } else {
+
+                    LOGG("_captureThread->Stop() failed..");
                     // Couldn't stop the thread, leak instead of crash.
                     WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceVideoCapture, -1,
                             "%s: could not stop capture thread", __FUNCTION__);
@@ -332,102 +454,51 @@ namespace webrtc {
             return static_cast<VideoCaptureModuleV4L2*> (obj)->CaptureProcess();
         }
 
-        bool VideoCaptureModuleV4L2::CaptureThreadAsync(void* obj) {
-            return static_cast<VideoCaptureModuleV4L2*> (obj)->CaptureProcessAsync();
-        }
-
-        int receiver(int fd, int events, void* data) {
-            // retrieve handle to videocapturemodule
-            MyEventReceiver* q = (MyEventReceiver*) data;
-
-            ssize_t n;
-            MyEventReceiver::Event buffer[1];
-
-            while ((n = q->getEvents(buffer, 1)) > 0) {
-                for (int i = 0; i < n; i++) {
-                    if (buffer[i].header.type == MyEventReceiver::DISPLAY_EVENT_VSYNC) {
-                        q->doCapture();
-                    }
-                }
-            }
-            if (n < 0) {
-                printf("error reading events (%s)\n", strerror(-n));
-            }
-
-            return 1;
-        }
-
         void VideoCaptureModuleV4L2::CleanupCapture() {
-            // shutdown VSYNC polling thread
-            Loop.TearDown();
-
-        }
-
-        bool VideoCaptureModuleV4L2::CaptureProcessAsync() {
-            android::MyEventReceiver myDisplayEvent;
-
-            myDisplayEvent.setCapture(this);
-
-            Loop.Setup(myDisplayEvent.getFd());
-            Loop.mLooper->addFd(myDisplayEvent.getFd(), 0, ALOOPER_EVENT_INPUT, receiver,
-                    &myDisplayEvent);
-
-            // set rate to 30 hz ( skip every other event )
-            myDisplayEvent.setVsyncRate(2);
-
-            do {
-                //printf("about to poll...\n");
-                int32_t ret = Loop.mLooper->pollOnce(-1);
-                switch (ret) {
-                    case ALOOPER_POLL_WAKE:
-                        //("ALOOPER_POLL_WAKE\n");
-                        break;
-                    case ALOOPER_POLL_CALLBACK:
-                        //("ALOOPER_POLL_CALLBACK\n");
-                        break;
-                    case ALOOPER_POLL_TIMEOUT:
-                        printf("ALOOPER_POLL_TIMEOUT\n");
-                        break;
-                        // Looper is killed so exit 
-                    case ALOOPER_POLL_ERROR:
-                        printf("ALOOPER_POLL_ERROR\n");
-                        goto end;
-                        break;
-                    default:
-                        printf("ugh? poll returned %d\n", ret);
-                        break;
-                }
-            } while (1);
-end:
-            return true;
+            // shutdown VSYNC polling thread            
+            Loop->TearDown();
+            delete Loop;
+            _captureCritSect->Leave();
+            LOGG("CleanupCapture Completed...");
         }
 
         bool VideoCaptureModuleV4L2::CaptureProcess() {
+            LOGG("CaptureProcess2() Start");
             int retVal = 0;
             fd_set rSet;
             struct timeval timeout;
 
 
-            _captureCritSect->Enter();
 
             FD_ZERO(&rSet);
             FD_SET(_deviceFd, &rSet);
             timeout.tv_sec = 1;
             timeout.tv_usec = 0;
 
+            //sleep(1);// 1000ms
+            if (Loop->loop())
+                LOGG("VSYNC event occurred");
+            else
+                LOGG("VSYNC event ERROR occurred");
+            _captureCritSect->Enter();
+
+
             retVal = select(_deviceFd + 1, &rSet, NULL, NULL, &timeout);
             if (retVal < 0 && errno != EINTR) // continue if interrupted
             {
                 // select failed
                 _captureCritSect->Leave();
+                LOGG("Capture Process failed: returning");
                 return false;
             } else if (retVal == 0) {
                 // select timed out
+                LOGG("Capture Process timeout: returning");
                 _captureCritSect->Leave();
                 return true;
             } else if (!FD_ISSET(_deviceFd, &rSet)) {
-                // not event on camera handle
+                // not event on camera handle                
                 _captureCritSect->Leave();
+                LOGG("Capture Process invalid handle: returning");
                 return true;
             }
 
@@ -448,6 +519,7 @@ end:
             }
             _captureCritSect->Leave();
             usleep(0);
+            LOGG("Capture Process returning normally");
             return true;
         }
 
