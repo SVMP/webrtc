@@ -115,6 +115,7 @@
               ],
               'cflags': [
               '-Wno-multichar',
+	      '-DHAVE_PTHREADS'
               ],
               'ldflags': [
                 '-L <(aosp_root)/out/target/product/svmp/system/lib/',

@@ -120,10 +120,9 @@ namespace webrtc {
             virtual int32_t StartCapture(const VideoCaptureCapability& capability);
             virtual int32_t StopCapture();
             virtual bool CaptureStarted();
-            virtual int32_t CaptureSettings(VideoCaptureCapability& settings);
-            //bool CaptureProcessAsync();
+            virtual int32_t CaptureSettings(VideoCaptureCapability& settings);            
             bool CaptureProcess();
-            //bool CaptureProcess2();
+
 
         private:
 

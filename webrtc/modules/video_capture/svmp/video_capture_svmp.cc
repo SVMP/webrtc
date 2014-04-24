@@ -104,7 +104,11 @@ namespace android {
     bool LooperHelper::loop() {
         LOGG("about to pollOnce()");
         if (_capturing) {
-            int32_t ret = mLooper->pollOnce(100);
+            // After connection to VSYNC service is closed,
+            // a timeout will occur when the timeout occurs the video capture thread can be closed.
+            // The timeout must be high enough to handle normal system delay which can generate false positives.
+            // 
+            int32_t ret = mLooper->pollOnce(900); 
             LOGG("after pollOnce()");
             switch (ret) {
                 case ALOOPER_POLL_WAKE:
@@ -128,9 +132,12 @@ namespace android {
                     LOGG("ugh? poll returned %d\n", ret);
                     break;
             }
-        } else
+        } else {
+            LOGG("not _capturing..");
+            usleep(100000);
             return false;
 
+        }
 
         return false;
 success:

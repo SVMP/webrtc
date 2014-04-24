@@ -38,5 +38,5 @@ ninja -C out/Debug -j 4 libjingle_peerconnection_jar
 #strip out/Release/svmp-fbstream-webrtc
 # This is what needs to go to AOSP build.
 #strip out/Release/libjingle_peerconnection_so.so
-cp out/Debug/libjingle_peerconnection_so.so out/Debug/libjingle_peerconnection_so_dbg.so
-$STRIP out/Debug/libjingle_peerconnection_so.so
+cp out/Debug/libjingle_peerconnection_so.so out/Debug/libjingle_peerconnection_so-install.so
+$STRIP out/Debug/libjingle_peerconnection_so-install.so
