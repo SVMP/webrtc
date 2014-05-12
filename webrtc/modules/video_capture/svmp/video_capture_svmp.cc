@@ -349,6 +349,10 @@ namespace webrtc {
                 return -1;
             }
 
+            // Startup VSYNC Event Looper
+            Loop = new LooperHelper();
+            Loop->Setup(this);
+
             //start capture thread;
             if (!_captureThread) {
                 _captureThread = ThreadWrapper::CreateThread(
@@ -359,9 +363,6 @@ namespace webrtc {
 
             }
 
-            // Startup VSYNC Event Looper
-            Loop = new LooperHelper();
-            Loop->Setup(this);
             _captureStarted = true;
             return 0;
 

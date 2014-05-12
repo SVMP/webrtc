@@ -34,7 +34,9 @@
 
 
 // Android stuff
+#ifndef HAVE_PTHREADS
 #define HAVE_PTHREADS
+#endif
 #include <gui/DisplayEventReceiver.h>
 #include <utils/Looper.h>
 #include <utils/Thread.h>
