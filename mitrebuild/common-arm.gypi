@@ -3077,7 +3077,7 @@
     ['os_posix==1 and (chromeos==0 or target_arch!="arm")', {
       'target_defaults': {
         'ldflags': [
-          '-Wl,--fatal-warnings',
+          '-Wl,--no-fatal-warnings',
           '-Wl,-z,now',
           '-Wl,-z,relro',
         ],
@@ -4217,7 +4217,7 @@
               '-Wl,-O1',
               '-Wl,--as-needed',
               '-Wl,--warn-shared-textrel',
-              '-Wl,--fatal-warnings',
+              '-Wl,--no-fatal-warnings',
             ],
           }],
           # Settings for building host targets on mac.
