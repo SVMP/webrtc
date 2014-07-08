@@ -13,18 +13,17 @@
 #include <vector>
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webrtc/common.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
 #include "webrtc/modules/audio_coding/main/test/APITest.h"
 #include "webrtc/modules/audio_coding/main/test/EncodeDecodeTest.h"
 #include "webrtc/modules/audio_coding/main/test/iSACTest.h"
 #include "webrtc/modules/audio_coding/main/test/opus_test.h"
+#include "webrtc/modules/audio_coding/main/test/PacketLossTest.h"
 #include "webrtc/modules/audio_coding/main/test/TestAllCodecs.h"
-#include "webrtc/modules/audio_coding/main/test/TestFEC.h"
+#include "webrtc/modules/audio_coding/main/test/TestRedFec.h"
 #include "webrtc/modules/audio_coding/main/test/TestStereo.h"
 #include "webrtc/modules/audio_coding/main/test/TestVADDTX.h"
 #include "webrtc/modules/audio_coding/main/test/TwoWayCommunication.h"
-#include "webrtc/modules/audio_coding/main/test/utility.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 #include "webrtc/test/testsupport/fileutils.h"
 #include "webrtc/test/testsupport/gtest_disable.h"
@@ -39,21 +38,7 @@ TEST(AudioCodingModuleTest, TestAllCodecs) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
           "acm_allcodecs_trace.txt").c_str());
-  webrtc::Config config;
-
-  UseLegacyAcm(&config);
-  webrtc::TestAllCodecs(ACM_TEST_MODE, config).Perform();
-  Trace::ReturnTrace();
-}
-
-TEST(AudioCodingModuleTest, TestAllCodecsNewACM) {
-  Trace::CreateTrace();
-  Trace::SetTraceFile((webrtc::test::OutputPath() +
-          "acm_allcodecs_trace_new.txt").c_str());
-  webrtc::Config config;
-
-  UseNewAcm(&config);
-  webrtc::TestAllCodecs(ACM_TEST_MODE, config).Perform();
+  webrtc::TestAllCodecs(ACM_TEST_MODE).Perform();
   Trace::ReturnTrace();
 }
 
@@ -61,43 +46,15 @@ TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestEncodeDecode)) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
       "acm_encodedecode_trace.txt").c_str());
-  webrtc::Config config;
-
-  UseLegacyAcm(&config);
-  webrtc::EncodeDecodeTest(ACM_TEST_MODE, config).Perform();
+  webrtc::EncodeDecodeTest(ACM_TEST_MODE).Perform();
   Trace::ReturnTrace();
 }
 
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestEncodeDecodeNewACM)) {
-  Trace::CreateTrace();
-  Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "acm_encodedecode_trace_new.txt").c_str());
-  webrtc::Config config;
-
-  UseNewAcm(&config);
-  webrtc::EncodeDecodeTest(ACM_TEST_MODE, config).Perform();
-  Trace::ReturnTrace();
-}
-
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestFEC)) {
+TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestRedFec)) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
       "acm_fec_trace.txt").c_str());
-  webrtc::Config config;
-
-  UseLegacyAcm(&config);
-  webrtc::TestFEC(config).Perform();
-  Trace::ReturnTrace();
-}
-
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestFECNewACM)) {
-  Trace::CreateTrace();
-  Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "acm_fec_trace_new.txt").c_str());
-  webrtc::Config config;
-
-  UseNewAcm(&config);
-  webrtc::TestFEC(config).Perform();
+  webrtc::TestRedFec().Perform();
   Trace::ReturnTrace();
 }
 
@@ -105,21 +62,7 @@ TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestIsac)) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
       "acm_isac_trace.txt").c_str());
-  webrtc::Config config;
-
-  UseLegacyAcm(&config);
-  webrtc::ISACTest(ACM_TEST_MODE, config).Perform();
-  Trace::ReturnTrace();
-}
-
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestIsacNewACM)) {
-  Trace::CreateTrace();
-  Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "acm_isac_trace_new.txt").c_str());
-  webrtc::Config config;
-
-  UseNewAcm(&config);
-  webrtc::ISACTest(ACM_TEST_MODE, config).Perform();
+  webrtc::ISACTest(ACM_TEST_MODE).Perform();
   Trace::ReturnTrace();
 }
 
@@ -127,21 +70,7 @@ TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TwoWayCommunication)) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
       "acm_twowaycom_trace.txt").c_str());
-  webrtc::Config config;
-
-  UseLegacyAcm(&config);
-  webrtc::TwoWayCommunication(ACM_TEST_MODE, config).Perform();
-  Trace::ReturnTrace();
-}
-
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TwoWayCommunicationNewACM)) {
-  Trace::CreateTrace();
-  Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "acm_twowaycom_trace_new.txt").c_str());
-  webrtc::Config config;
-
-  UseNewAcm(&config);
-  webrtc::TwoWayCommunication(ACM_TEST_MODE, config).Perform();
+  webrtc::TwoWayCommunication(ACM_TEST_MODE).Perform();
   Trace::ReturnTrace();
 }
 
@@ -149,21 +78,7 @@ TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestStereo)) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
       "acm_stereo_trace.txt").c_str());
-  webrtc::Config config;
-
-  UseLegacyAcm(&config);
-  webrtc::TestStereo(ACM_TEST_MODE, config).Perform();
-  Trace::ReturnTrace();
-}
-
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestStereoNewACM)) {
-  Trace::CreateTrace();
-  Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "acm_stereo_trace_new.txt").c_str());
-  webrtc::Config config;
-
-  UseNewAcm(&config);
-  webrtc::TestStereo(ACM_TEST_MODE, config).Perform();
+  webrtc::TestStereo(ACM_TEST_MODE).Perform();
   Trace::ReturnTrace();
 }
 
@@ -171,21 +86,7 @@ TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestVADDTX)) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
       "acm_vaddtx_trace.txt").c_str());
-  webrtc::Config config;
-
-  UseLegacyAcm(&config);
-  webrtc::TestVADDTX(config).Perform();
-  Trace::ReturnTrace();
-}
-
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestVADDTXNewACM)) {
-  Trace::CreateTrace();
-  Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "acm_vaddtx_trace_new.txt").c_str());
-  webrtc::Config config;
-
-  UseNewAcm(&config);
-  webrtc::TestVADDTX(config).Perform();
+  webrtc::TestVADDTX().Perform();
   Trace::ReturnTrace();
 }
 
@@ -193,21 +94,39 @@ TEST(AudioCodingModuleTest, TestOpus) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
       "acm_opus_trace.txt").c_str());
-  webrtc::Config config;
-
-  UseLegacyAcm(&config);
-  webrtc::OpusTest(config).Perform();
+  webrtc::OpusTest().Perform();
   Trace::ReturnTrace();
 }
 
-TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestOpusNewACM)) {
+TEST(AudioCodingModuleTest, TestPacketLoss) {
   Trace::CreateTrace();
   Trace::SetTraceFile((webrtc::test::OutputPath() +
-      "acm_opus_trace_new.txt").c_str());
-  webrtc::Config config;
+      "acm_packetloss_trace.txt").c_str());
+  webrtc::PacketLossTest(1, 10, 10, 1).Perform();
+  Trace::ReturnTrace();
+}
 
-  UseNewAcm(&config);
-  webrtc::OpusTest(config).Perform();
+TEST(AudioCodingModuleTest, TestPacketLossBurst) {
+  Trace::CreateTrace();
+  Trace::SetTraceFile((webrtc::test::OutputPath() +
+      "acm_packetloss_burst_trace.txt").c_str());
+  webrtc::PacketLossTest(1, 10, 10, 2).Perform();
+  Trace::ReturnTrace();
+}
+
+TEST(AudioCodingModuleTest, TestPacketLossStereo) {
+  Trace::CreateTrace();
+  Trace::SetTraceFile((webrtc::test::OutputPath() +
+      "acm_packetloss_trace.txt").c_str());
+  webrtc::PacketLossTest(2, 10, 10, 1).Perform();
+  Trace::ReturnTrace();
+}
+
+TEST(AudioCodingModuleTest, TestPacketLossStereoBurst) {
+  Trace::CreateTrace();
+  Trace::SetTraceFile((webrtc::test::OutputPath() +
+      "acm_packetloss_burst_trace.txt").c_str());
+  webrtc::PacketLossTest(2, 10, 10, 2).Perform();
   Trace::ReturnTrace();
 }
 
@@ -218,14 +137,7 @@ TEST(AudioCodingModuleTest, DISABLED_ON_ANDROID(TestOpusNewACM)) {
     Trace::CreateTrace();
     Trace::SetTraceFile((webrtc::test::OutputPath() +
         "acm_apitest_trace.txt").c_str());
-    webrtc::Config config;
-
-    UseLegacyAcm(&config);
-    webrtc::APITest(config).Perform();
-
-    UseNewAcm(&config);
-    webrtc::APITest(config).Perform();
-
+    webrtc::APITest().Perform();
     Trace::ReturnTrace();
   }
 #endif

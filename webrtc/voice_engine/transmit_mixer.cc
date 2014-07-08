@@ -421,10 +421,7 @@ TransmitMixer::DemuxAndMix()
          it.Increment())
     {
         Channel* channelPtr = it.GetChannel();
-        if (channelPtr->InputIsOnHold())
-        {
-            channelPtr->UpdateLocalTimeStamp();
-        } else if (channelPtr->Sending())
+        if (channelPtr->Sending())
         {
             // Demultiplex makes a copy of its input.
             channelPtr->Demultiplex(_audioFrame);
@@ -440,9 +437,7 @@ void TransmitMixer::DemuxAndMix(const int voe_channels[],
     voe::ChannelOwner ch = _channelManagerPtr->GetChannel(voe_channels[i]);
     voe::Channel* channel_ptr = ch.channel();
     if (channel_ptr) {
-      if (channel_ptr->InputIsOnHold()) {
-        channel_ptr->UpdateLocalTimeStamp();
-      } else if (channel_ptr->Sending()) {
+      if (channel_ptr->Sending()) {
         // Demultiplex makes a copy of its input.
         channel_ptr->Demultiplex(_audioFrame);
         channel_ptr->PrepareEncodeAndSend(_audioFrame.sample_rate_hz_);
@@ -461,7 +456,7 @@ TransmitMixer::EncodeAndSend()
          it.Increment())
     {
         Channel* channelPtr = it.GetChannel();
-        if (channelPtr->Sending() && !channelPtr->InputIsOnHold())
+        if (channelPtr->Sending())
         {
             channelPtr->EncodeAndSend();
         }
@@ -474,7 +469,7 @@ void TransmitMixer::EncodeAndSend(const int voe_channels[],
   for (int i = 0; i < number_of_voe_channels; ++i) {
     voe::ChannelOwner ch = _channelManagerPtr->GetChannel(voe_channels[i]);
     voe::Channel* channel_ptr = ch.channel();
-    if (channel_ptr && channel_ptr->Sending() && !channel_ptr->InputIsOnHold())
+    if (channel_ptr && channel_ptr->Sending())
       channel_ptr->EncodeAndSend();
   }
 }
@@ -684,34 +679,6 @@ int TransmitMixer::IsPlayingFileAsMicrophone() const
     WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, -1),
                  "TransmitMixer::IsPlayingFileAsMicrophone()");
     return _filePlaying;
-}
-
-int TransmitMixer::ScaleFileAsMicrophonePlayout(float scale)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, -1),
-                 "TransmitMixer::ScaleFileAsMicrophonePlayout(scale=%5.3f)",
-                 scale);
-
-    CriticalSectionScoped cs(&_critSect);
-
-    if (!_filePlaying)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_INVALID_OPERATION, kTraceError,
-            "ScaleFileAsMicrophonePlayout() isnot playing file");
-        return -1;
-    }
-
-    if ((_filePlayerPtr == NULL) ||
-        (_filePlayerPtr->SetAudioScaling(scale) != 0))
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_BAD_ARGUMENT, kTraceError,
-            "SetAudioScaling() failed to scale playout");
-        return -1;
-    }
-
-    return 0;
 }
 
 int TransmitMixer::StartRecordingMicrophone(const char* fileName,
@@ -1178,7 +1145,12 @@ void TransmitMixer::GenerateAudioFrame(const int16_t* audio,
   // See: https://code.google.com/p/webrtc/issues/detail?id=3146
   // When 48 kHz is supported natively by AudioProcessing, this will have
   // to be changed to handle 44.1 kHz.
-  codec_rate = std::min(codec_rate, kAudioProcMaxNativeSampleRateHz);
+  int max_sample_rate_hz = kAudioProcMaxNativeSampleRateHz;
+  if (audioproc_->echo_control_mobile()->is_enabled()) {
+    // AECM only supports 8 and 16 kHz.
+    max_sample_rate_hz = 16000;
+  }
+  codec_rate = std::min(codec_rate, max_sample_rate_hz);
   stereo_codec_ = num_codec_channels == 2;
 
   if (!mono_buffer_.get()) {
@@ -1222,7 +1194,7 @@ int32_t TransmitMixer::RecordAudioToFile(
 int32_t TransmitMixer::MixOrReplaceAudioWithFile(
     int mixingFrequency)
 {
-    scoped_array<int16_t> fileBuffer(new int16_t[640]);
+    scoped_ptr<int16_t[]> fileBuffer(new int16_t[640]);
 
     int fileSamples(0);
     {

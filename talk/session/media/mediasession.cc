@@ -62,6 +62,10 @@ using talk_base::scoped_ptr;
 // RFC4585
 const char kMediaProtocolAvpf[] = "RTP/AVPF";
 // RFC5124
+const char kMediaProtocolDtlsSavpf[] = "UDP/TLS/RTP/SAVPF";
+
+// This should be replaced by "UDP/TLS/RTP/SAVPF", but we need to support it for
+// now to be compatible with previous Chrome versions.
 const char kMediaProtocolSavpf[] = "RTP/SAVPF";
 
 const char kMediaProtocolRtpPrefix[] = "RTP/";
@@ -304,6 +308,20 @@ static void GetCurrentStreamParams(const SessionDescription* sdesc,
     for (StreamParamsVec::const_iterator it = streams.begin();
          it != streams.end(); ++it) {
       stream_params->push_back(*it);
+    }
+  }
+}
+
+// Filters the data codecs for the data channel type.
+void FilterDataCodecs(std::vector<DataCodec>* codecs, bool sctp) {
+  // Filter RTP codec for SCTP and vice versa.
+  int codec_id = sctp ? kGoogleRtpDataCodecId : kGoogleSctpDataCodecId;
+  for (std::vector<DataCodec>::iterator iter = codecs->begin();
+       iter != codecs->end();) {
+    if (iter->id == codec_id) {
+      iter = codecs->erase(iter);
+    } else {
+      ++iter;
     }
   }
 }
@@ -757,6 +775,11 @@ static void NegotiateCodecs(const std::vector<C>& local_codecs,
           negotiated.SetParam(kCodecParamAssociatedPayloadType, apt_value);
         }
         negotiated.id = theirs->id;
+        // RFC3264: Although the answerer MAY list the formats in their desired
+        // order of preference, it is RECOMMENDED that unless there is a
+        // specific reason, the answerer list formats in the same relative order
+        // they were present in the offer.
+        negotiated.preference = theirs->preference;
         negotiated_codecs->push_back(negotiated);
       }
     }
@@ -973,17 +996,20 @@ static bool CreateMediaContentAnswer(
 }
 
 static bool IsMediaProtocolSupported(MediaType type,
-                                     const std::string& protocol) {
+                                     const std::string& protocol,
+                                     bool secure_transport) {
   // Data channels can have a protocol of SCTP or SCTP/DTLS.
   if (type == MEDIA_TYPE_DATA &&
-      (protocol == kMediaProtocolSctp ||
-       protocol == kMediaProtocolDtlsSctp)) {
+      ((protocol == kMediaProtocolSctp && !secure_transport)||
+       (protocol == kMediaProtocolDtlsSctp && secure_transport))) {
     return true;
   }
+
   // Since not all applications serialize and deserialize the media protocol,
   // we will have to accept |protocol| to be empty.
-  return protocol == kMediaProtocolAvpf || protocol == kMediaProtocolSavpf ||
-      protocol.empty();
+  return protocol == kMediaProtocolAvpf || protocol.empty() ||
+      protocol == kMediaProtocolSavpf ||
+      (protocol == kMediaProtocolDtlsSavpf && secure_transport);
 }
 
 static void SetMediaProtocol(bool secure_transport,
@@ -1204,6 +1230,8 @@ SessionDescription* MediaSessionDescriptionFactory::CreateOffer(
     scoped_ptr<DataContentDescription> data(new DataContentDescription());
     bool is_sctp = (options.data_channel_type == DCT_SCTP);
 
+    FilterDataCodecs(&data_codecs, is_sctp);
+
     cricket::SecurePolicy sdes_policy =
         IsDtlsActive(CN_DATA, current_description) ?
             cricket::SEC_DISABLED : secure();
@@ -1321,8 +1349,9 @@ SessionDescription* MediaSessionDescriptionFactory::CreateAnswer(
     }
 
     bool rejected = !options.has_audio || audio_content->rejected ||
-          !IsMediaProtocolSupported(MEDIA_TYPE_AUDIO,
-                                    audio_answer->protocol());
+        !IsMediaProtocolSupported(MEDIA_TYPE_AUDIO,
+                                  audio_answer->protocol(),
+                                  audio_transport->secure());
     if (!rejected) {
       AddTransportAnswer(audio_content->name, *(audio_transport.get()),
                          answer.get());
@@ -1369,7 +1398,9 @@ SessionDescription* MediaSessionDescriptionFactory::CreateAnswer(
       return NULL;
     }
     bool rejected = !options.has_video || video_content->rejected ||
-        !IsMediaProtocolSupported(MEDIA_TYPE_VIDEO, video_answer->protocol());
+        !IsMediaProtocolSupported(MEDIA_TYPE_VIDEO,
+                                  video_answer->protocol(),
+                                  video_transport->secure());
     if (!rejected) {
       if (!AddTransportAnswer(video_content->name, *(video_transport.get()),
                               answer.get())) {
@@ -1397,6 +1428,10 @@ SessionDescription* MediaSessionDescriptionFactory::CreateAnswer(
     if (!data_transport) {
       return NULL;
     }
+    bool is_sctp = (options.data_channel_type == DCT_SCTP);
+    std::vector<DataCodec> data_codecs(data_codecs_);
+    FilterDataCodecs(&data_codecs, is_sctp);
+
     scoped_ptr<DataContentDescription> data_answer(
         new DataContentDescription());
     // Do not require or create SDES cryptos if DTLS is used.
@@ -1418,7 +1453,9 @@ SessionDescription* MediaSessionDescriptionFactory::CreateAnswer(
     }
 
     bool rejected = !options.has_data() || data_content->rejected ||
-        !IsMediaProtocolSupported(MEDIA_TYPE_DATA, data_answer->protocol());
+        !IsMediaProtocolSupported(MEDIA_TYPE_DATA,
+                                  data_answer->protocol(),
+                                  data_transport->secure());
     if (!rejected) {
       data_answer->set_bandwidth(options.data_bandwidth);
       if (!AddTransportAnswer(data_content->name, *(data_transport.get()),

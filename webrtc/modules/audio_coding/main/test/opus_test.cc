@@ -15,13 +15,12 @@
 #include <string>
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webrtc/common.h"  // Config.
 #include "webrtc/common_types.h"
 #include "webrtc/engine_configurations.h"
 #include "webrtc/modules/audio_coding/codecs/opus/interface/opus_interface.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module_typedefs.h"
-#include "webrtc/modules/audio_coding/main/source/acm_codec_database.h"
-#include "webrtc/modules/audio_coding/main/source/acm_opus.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_codec_database.h"
+#include "webrtc/modules/audio_coding/main/acm2/acm_opus.h"
 #include "webrtc/modules/audio_coding/main/test/TestStereo.h"
 #include "webrtc/modules/audio_coding/main/test/utility.h"
 #include "webrtc/system_wrappers/interface/trace.h"
@@ -29,13 +28,12 @@
 
 namespace webrtc {
 
-OpusTest::OpusTest(const Config& config)
-    : acm_receiver_(config.Get<AudioCodingModuleFactory>().Create(0)),
+OpusTest::OpusTest()
+    : acm_receiver_(AudioCodingModule::Create(0)),
       channel_a2b_(NULL),
       counter_(0),
       payload_type_(255),
-      rtp_timestamp_(0) {
-}
+      rtp_timestamp_(0) {}
 
 OpusTest::~OpusTest() {
   if (channel_a2b_ != NULL) {
@@ -213,8 +211,9 @@ void OpusTest::Run(TestPackStereo* channel, int channels, int bitrate,
                    int frame_length, int percent_loss) {
   AudioFrame audio_frame;
   int32_t out_freq_hz_b = out_file_.SamplingFrequency();
-  int16_t audio[480 * 12 * 2];  // Can hold 120 ms stereo audio.
-  int16_t out_audio[480 * 12 * 2];  // Can hold 120 ms stereo audio.
+  const int kBufferSizeSamples = 480 * 12 * 2;  // Can hold 120 ms stereo audio.
+  int16_t audio[kBufferSizeSamples];
+  int16_t out_audio[kBufferSizeSamples];
   int16_t audio_type;
   int written_samples = 0;
   int read_samples = 0;
@@ -254,11 +253,13 @@ void OpusTest::Run(TestPackStereo* channel, int channels, int bitrate,
     }
 
     // If input audio is sampled at 32 kHz, resampling to 48 kHz is required.
-    EXPECT_EQ(480, resampler_.Resample10Msec(audio_frame.data_,
-                                             audio_frame.sample_rate_hz_,
-                                             &audio[written_samples],
-                                             48000,
-                                             channels));
+    EXPECT_EQ(480,
+              resampler_.Resample10Msec(audio_frame.data_,
+                                        audio_frame.sample_rate_hz_,
+                                        48000,
+                                        channels,
+                                        kBufferSizeSamples - written_samples,
+                                        &audio[written_samples]));
     written_samples += 480 * channels;
 
     // Sometimes we need to loop over the audio vector to produce the right

@@ -104,6 +104,7 @@
     {
       'target_name': 'libjingle_unittest',
       'type': 'executable',
+      'includes': [ 'build/ios_tests.gypi', ],
       'dependencies': [
         'gunit',
         'libjingle.gyp:libjingle',
@@ -286,9 +287,7 @@
         'media/base/videoengine_unittest.h',
         'media/devices/dummydevicemanager_unittest.cc',
         'media/devices/filevideocapturer_unittest.cc',
-        # TODO(jiayl): Enable the SCTP test once the memcheck and tsan bots
-        # failures are fixed (issue 2846).
-        #'media/sctp/sctpdataengine_unittest.cc',
+        'media/sctp/sctpdataengine_unittest.cc',
         'media/webrtc/webrtcpassthroughrender_unittest.cc',
         'media/webrtc/webrtcvideocapturer_unittest.cc',
         # Omitted because depends on non-open-source testdata files.
@@ -299,6 +298,8 @@
         # TODO(ronghuawu): Reenable these tests.
         # 'media/devices/devicemanager_unittest.cc',
         'media/webrtc/webrtcvideoengine_unittest.cc',
+        'media/webrtc/webrtcvideoengine2_unittest.cc',
+        'media/webrtc/webrtcvideoengine2_unittest.h',
         'media/webrtc/webrtcvoiceengine_unittest.cc',
       ],
       'conditions': [
@@ -356,6 +357,7 @@
         'p2p/client/connectivitychecker_unittest.cc',
         'p2p/client/fakeportallocator.h',
         'p2p/client/portallocator_unittest.cc',
+        'session/media/bundlefilter_unittest.cc',
         'session/media/channel_unittest.cc',
         'session/media/channelmanager_unittest.cc',
         'session/media/currentspeakermonitor_unittest.cc',
@@ -365,7 +367,6 @@
         'session/media/mediasessionclient_unittest.cc',
         'session/media/rtcpmuxfilter_unittest.cc',
         'session/media/srtpfilter_unittest.cc',
-        'session/media/ssrcmuxfilter_unittest.cc',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -383,20 +384,25 @@
       'target_name': 'libjingle_peerconnection_unittest',
       'type': 'executable',
       'dependencies': [
+        '<(DEPTH)/testing/gmock.gyp:gmock',
         'gunit',
         'libjingle.gyp:libjingle',
         'libjingle.gyp:libjingle_p2p',
         'libjingle.gyp:libjingle_peerconnection',
         'libjingle_unittest_main',
       ],
-      # TODO(ronghuawu): Reenable below unit tests that require gmock.
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '<(DEPTH)/testing/gmock/include',
+        ],
+      },
       'sources': [
-        # 'app/webrtc/datachannel_unittest.cc',
+        'app/webrtc/datachannel_unittest.cc',
         'app/webrtc/dtmfsender_unittest.cc',
         'app/webrtc/jsepsessiondescription_unittest.cc',
         'app/webrtc/localaudiosource_unittest.cc',
-        # 'app/webrtc/mediastream_unittest.cc',
-        # 'app/webrtc/mediastreamhandler_unittest.cc',
+        'app/webrtc/mediastream_unittest.cc',
+        'app/webrtc/mediastreamhandler_unittest.cc',
         'app/webrtc/mediastreamsignaling_unittest.cc',
         'app/webrtc/peerconnection_unittest.cc',
         'app/webrtc/peerconnectionendtoend_unittest.cc',
@@ -405,6 +411,7 @@
         # 'app/webrtc/peerconnectionproxy_unittest.cc',
         'app/webrtc/remotevideocapturer_unittest.cc',
         'app/webrtc/sctputils.cc',
+        'app/webrtc/statscollector_unittest.cc',
         'app/webrtc/test/fakeaudiocapturemodule.cc',
         'app/webrtc/test/fakeaudiocapturemodule.h',
         'app/webrtc/test/fakeaudiocapturemodule_unittest.cc',
@@ -422,6 +429,21 @@
         'app/webrtc/videotrack_unittest.cc',
         'app/webrtc/webrtcsdp_unittest.cc',
         'app/webrtc/webrtcsession_unittest.cc',
+      ],
+      'conditions': [
+        ['OS=="android"', {
+          # We want gmock features that use tr1::tuple, but we currently
+          # don't support the variadic templates used by libstdc++'s
+          # implementation. gmock supports this scenario by providing its
+          # own implementation but we must opt in to it.
+          'defines': [
+            'GTEST_USE_OWN_TR1_TUPLE=1',
+            # GTEST_USE_OWN_TR1_TUPLE only works if GTEST_HAS_TR1_TUPLE is set.
+            # gmock r625 made it so that GTEST_HAS_TR1_TUPLE is set to 0
+            # automatically on android, so it has to be set explicitly here.
+            'GTEST_HAS_TR1_TUPLE=1',
+           ],
+        }],
       ],
     },  # target libjingle_peerconnection_unittest
   ],
@@ -492,11 +514,37 @@
       # does just fine on 10.6 too).
       'targets': [
         {
-        'target_name': 'libjingle_peerconnection_objc_test',
-          'variables': {
-            'infoplist_file': './app/webrtc/objctests/Info.plist',
-          },
+          'target_name': 'libjingle_peerconnection_objc_test',
           'type': 'executable',
+          'includes': [ 'build/ios_tests.gypi', ],
+          'dependencies': [
+            'gunit',
+            'libjingle.gyp:libjingle_peerconnection_objc',
+          ],
+          'sources': [
+            'app/webrtc/objctests/RTCPeerConnectionSyncObserver.h',
+            'app/webrtc/objctests/RTCPeerConnectionSyncObserver.m',
+            'app/webrtc/objctests/RTCPeerConnectionTest.mm',
+            'app/webrtc/objctests/RTCSessionDescriptionSyncObserver.h',
+            'app/webrtc/objctests/RTCSessionDescriptionSyncObserver.m',
+            # TODO(fischman): figure out if this works for ios or if it
+            # needs a GUI driver.
+            'app/webrtc/objctests/mac/main.mm',
+          ],
+          'FRAMEWORK_SEARCH_PATHS': [
+            '$(inherited)',
+            '$(SDKROOT)/Developer/Library/Frameworks',
+            '$(DEVELOPER_LIBRARY_DIR)/Frameworks',
+          ],
+
+          # TODO(fischman): there is duplication here with
+          # build/ios_tests.gypi, because for historical reasons the
+          # mac x64 bots expect this unittest to be in a bundle
+          # directory (.app).  Once the bots don't expect this
+          # anymore, remove this duplication.
+          'variables': {
+            'infoplist_file': 'build/ios_test.plist',
+          },
           'mac_bundle': 1,
           'mac_bundle_resources': [
             '<(infoplist_file)',
@@ -508,31 +556,18 @@
           ],
           'xcode_settings': {
             'CLANG_ENABLE_OBJC_ARC': 'YES',
+            # common.gypi enables this for mac but we want this to be disabled
+            # like it is for ios.
+            'CLANG_WARN_OBJC_MISSING_PROPERTY_SYNTHESIS': 'NO',
             'INFOPLIST_FILE': '<(infoplist_file)',
           },
-          'dependencies': [
-            'gunit',
-            'libjingle.gyp:libjingle_peerconnection_objc',
-          ],
-          'FRAMEWORK_SEARCH_PATHS': [
-            '$(inherited)',
-            '$(SDKROOT)/Developer/Library/Frameworks',
-            '$(DEVELOPER_LIBRARY_DIR)/Frameworks',
-          ],
-          'sources': [
-            'app/webrtc/objctests/RTCPeerConnectionSyncObserver.h',
-            'app/webrtc/objctests/RTCPeerConnectionSyncObserver.m',
-            'app/webrtc/objctests/RTCPeerConnectionTest.mm',
-            'app/webrtc/objctests/RTCSessionDescriptionSyncObserver.h',
-            'app/webrtc/objctests/RTCSessionDescriptionSyncObserver.m',
-          ],
           'conditions': [
-            ['OS=="mac" or OS=="ios"', {
-              'sources': [
-                # TODO(fischman): figure out if this works for ios or if it
-                # needs a GUI driver.
-                'app/webrtc/objctests/mac/main.mm',
-              ],
+            ['OS=="mac"', {
+              'xcode_settings': {
+                # Need to build against 10.7 framework for full ARC support
+                # on OSX.
+                'MACOSX_DEPLOYMENT_TARGET' : '10.7',
+              },
             }],
           ],
         },  # target libjingle_peerconnection_objc_test

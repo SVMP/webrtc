@@ -55,7 +55,9 @@ class VoiceChannel;
 }  // namespace cricket
 
 namespace webrtc {
+
 class IceRestartAnswerLatch;
+class JsepIceCandidate;
 class MediaStreamSignaling;
 class WebRtcSessionDescriptionFactory;
 
@@ -112,7 +114,8 @@ class WebRtcSession : public cricket::BaseSession,
 
   bool Initialize(const PeerConnectionFactoryInterface::Options& options,
                   const MediaConstraintsInterface* constraints,
-                  DTLSIdentityServiceInterface* dtls_identity_service);
+                  DTLSIdentityServiceInterface* dtls_identity_service,
+                  PeerConnectionInterface::IceTransportsType ice_transport);
   // Deletes the voice, video and data channel and changes the session state
   // to STATE_RECEIVEDTERMINATE.
   void Terminate();
@@ -152,6 +155,9 @@ class WebRtcSession : public cricket::BaseSession,
   bool SetRemoteDescription(SessionDescriptionInterface* desc,
                             std::string* err_desc);
   bool ProcessIceMessage(const IceCandidateInterface* ice_candidate);
+
+  bool UpdateIce(PeerConnectionInterface::IceTransportsType type);
+
   const SessionDescriptionInterface* local_description() const {
     return local_desc_.get();
   }
@@ -160,7 +166,9 @@ class WebRtcSession : public cricket::BaseSession,
   }
 
   // Get the id used as a media stream track's "id" field from ssrc.
-  virtual bool GetTrackIdBySsrc(uint32 ssrc, std::string* id);
+  virtual bool GetLocalTrackIdBySsrc(uint32 ssrc, std::string* track_id);
+  virtual bool GetRemoteTrackIdBySsrc(uint32 ssrc, std::string* track_id);
+
 
   // AudioMediaProviderInterface implementation.
   virtual void SetAudioPlayout(uint32 ssrc, bool enable,
@@ -282,9 +290,6 @@ class WebRtcSession : public cricket::BaseSession,
   void OnDataChannelMessageReceived(cricket::DataChannel* channel,
                                     const cricket::ReceiveDataParams& params,
                                     const talk_base::Buffer& payload);
-
-  bool GetLocalTrackId(uint32 ssrc, std::string* track_id);
-  bool GetRemoteTrackId(uint32 ssrc, std::string* track_id);
 
   std::string BadStateErrMsg(State state);
   void SetIceConnectionState(PeerConnectionInterface::IceConnectionState state);

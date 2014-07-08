@@ -143,6 +143,8 @@ class ChannelManager : public talk_base::MessageHandler,
   bool SetAudioOptions(const std::string& wave_in_device,
                        const std::string& wave_out_device,
                        const AudioOptions& options);
+  // Sets Engine-specific audio options according to enabled experiments.
+  bool SetEngineAudioOptions(const AudioOptions& options);
   bool GetOutputVolume(int* level);
   bool SetOutputVolume(int level);
   bool IsSameCapturer(const std::string& capturer_name,
@@ -230,10 +232,6 @@ class ChannelManager : public talk_base::MessageHandler,
   // removed.
   VideoFormat GetStartCaptureFormat();
 
-  // TODO(turajs): Remove this function when ACM2 is in use. Used mainly to
-  // choose between ACM1 and ACM2.
-  bool SetAudioOptions(const AudioOptions& options);
-
  protected:
   // Adds non-transient parameters which can only be changed through the
   // options store.
@@ -270,6 +268,7 @@ class ChannelManager : public talk_base::MessageHandler,
   void DestroySoundclip_w(Soundclip* soundclip);
   bool SetAudioOptions_w(const AudioOptions& options, int delay_offset,
                          const Device* in_dev, const Device* out_dev);
+  bool SetEngineAudioOptions_w(const AudioOptions& options);
   bool SetCaptureDevice_w(const Device* cam_device);
   void OnVideoCaptureStateChange(VideoCapturer* capturer,
                                  CaptureState result);

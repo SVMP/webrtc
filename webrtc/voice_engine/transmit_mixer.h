@@ -117,8 +117,6 @@ public:
 
     int IsPlayingFileAsMicrophone() const;
 
-    int ScaleFileAsMicrophonePlayout(float scale);
-
     int StartRecordingMicrophone(const char* fileName,
                                  const CodecInst* codecInst);
 
@@ -200,7 +198,7 @@ private:
     // owns
     MonitorModule _monitorModule;
     AudioFrame _audioFrame;
-    PushResampler resampler_;  // ADM sample rate -> mixing rate
+    PushResampler<int16_t> resampler_;  // ADM sample rate -> mixing rate
     FilePlayer* _filePlayerPtr;
     FileRecorder* _fileRecorderPtr;
     FileRecorder* _fileCallRecorderPtr;

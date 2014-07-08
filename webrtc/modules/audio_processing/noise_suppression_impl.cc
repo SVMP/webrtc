@@ -68,10 +68,10 @@ int NoiseSuppressionImpl::ProcessCaptureAudio(AudioBuffer* audio) {
     Handle* my_handle = static_cast<Handle*>(handle(i));
 #if defined(WEBRTC_NS_FLOAT)
     err = WebRtcNs_Process(static_cast<Handle*>(handle(i)),
-                           audio->low_pass_split_data(i),
-                           audio->high_pass_split_data(i),
-                           audio->low_pass_split_data(i),
-                           audio->high_pass_split_data(i));
+                           audio->low_pass_split_data_f(i),
+                           audio->high_pass_split_data_f(i),
+                           audio->low_pass_split_data_f(i),
+                           audio->high_pass_split_data_f(i));
 #elif defined(WEBRTC_NS_FIXED)
     err = WebRtcNsx_Process(static_cast<Handle*>(handle(i)),
                             audio->low_pass_split_data(i),
@@ -141,19 +141,21 @@ void* NoiseSuppressionImpl::CreateHandle() const {
   return handle;
 }
 
-int NoiseSuppressionImpl::DestroyHandle(void* handle) const {
+void NoiseSuppressionImpl::DestroyHandle(void* handle) const {
 #if defined(WEBRTC_NS_FLOAT)
-  return WebRtcNs_Free(static_cast<Handle*>(handle));
+  WebRtcNs_Free(static_cast<Handle*>(handle));
 #elif defined(WEBRTC_NS_FIXED)
-  return WebRtcNsx_Free(static_cast<Handle*>(handle));
+  WebRtcNsx_Free(static_cast<Handle*>(handle));
 #endif
 }
 
 int NoiseSuppressionImpl::InitializeHandle(void* handle) const {
 #if defined(WEBRTC_NS_FLOAT)
-  return WebRtcNs_Init(static_cast<Handle*>(handle), apm_->sample_rate_hz());
+  return WebRtcNs_Init(static_cast<Handle*>(handle),
+                       apm_->proc_sample_rate_hz());
 #elif defined(WEBRTC_NS_FIXED)
-  return WebRtcNsx_Init(static_cast<Handle*>(handle), apm_->sample_rate_hz());
+  return WebRtcNsx_Init(static_cast<Handle*>(handle),
+                        apm_->proc_sample_rate_hz());
 #endif
 }
 

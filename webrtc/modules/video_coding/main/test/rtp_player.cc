@@ -61,7 +61,7 @@ class RawRtpPacket {
   uint16_t seq_num() const { return seq_num_; }
 
  private:
-  scoped_array<uint8_t> data_;
+  scoped_ptr<uint8_t[]> data_;
   uint32_t length_;
   int64_t resend_time_ms_;
   uint32_t ssrc_;
@@ -273,7 +273,7 @@ class SsrcHandlers {
             LostPackets* lost_packets)
         : rtp_header_parser_(RtpHeaderParser::Create()),
           rtp_payload_registry_(new RTPPayloadRegistry(
-              0, RTPPayloadStrategy::CreateStrategy(false))),
+              RTPPayloadStrategy::CreateStrategy(false))),
           rtp_module_(),
           payload_sink_(),
           ssrc_(ssrc),

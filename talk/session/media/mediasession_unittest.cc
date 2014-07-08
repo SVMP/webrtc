@@ -31,6 +31,7 @@
 #include "talk/base/gunit.h"
 #include "talk/base/fakesslidentity.h"
 #include "talk/base/messagedigest.h"
+#include "talk/base/ssladapter.h"
 #include "talk/media/base/codec.h"
 #include "talk/media/base/testutils.h"
 #include "talk/p2p/base/constants.h"
@@ -97,13 +98,13 @@ static const AudioCodec kAudioCodecs1[] = {
 
 static const AudioCodec kAudioCodecs2[] = {
   AudioCodec(126, "speex",  16000, 22000, 1, 3),
-  AudioCodec(127, "iLBC",   8000,  13300, 1, 2),
-  AudioCodec(0,   "PCMU",   8000,  64000, 1, 1),
+  AudioCodec(0,   "PCMU",   8000,  64000, 1, 2),
+  AudioCodec(127, "iLBC",   8000,  13300, 1, 1),
 };
 
 static const AudioCodec kAudioCodecsAnswer[] = {
-  AudioCodec(102, "iLBC",   8000,  13300, 1, 2),
-  AudioCodec(0,   "PCMU",   8000,  64000, 1, 1),
+  AudioCodec(102, "iLBC",   8000,  13300, 1, 5),
+  AudioCodec(0,   "PCMU",   8000,  64000, 1, 4),
 };
 
 static const VideoCodec kVideoCodecs1[] = {
@@ -117,7 +118,7 @@ static const VideoCodec kVideoCodecs2[] = {
 };
 
 static const VideoCodec kVideoCodecsAnswer[] = {
-  VideoCodec(97, "H264", 320, 200, 30, 2)
+  VideoCodec(97, "H264", 320, 200, 30, 1)
 };
 
 static const DataCodec kDataCodecs1[] = {
@@ -194,6 +195,14 @@ class MediaSessionDescriptionFactoryTest : public testing::Test {
     f2_.set_data_codecs(MAKE_VECTOR(kDataCodecs2));
     tdf1_.set_identity(&id1_);
     tdf2_.set_identity(&id2_);
+  }
+
+  static void SetUpTestCase() {
+    talk_base::InitializeSSL();
+  }
+
+  static void TearDownTestCase() {
+    talk_base::CleanupSSL();
   }
 
   // Create a video StreamParamsVec object with:
@@ -1379,10 +1388,12 @@ TEST_F(MediaSessionDescriptionFactoryTest,
   // The expected audio codecs are the common audio codecs from the first
   // offer/answer exchange plus the audio codecs only |f2_| offer, sorted in
   // preference order.
+  // TODO(wu): |updated_offer| should not include the codec
+  // (i.e. |kAudioCodecs2[0]|) the other side doesn't support.
   const AudioCodec kUpdatedAudioCodecOffer[] = {
-    kAudioCodecs2[0],
     kAudioCodecsAnswer[0],
     kAudioCodecsAnswer[1],
+    kAudioCodecs2[0],
   };
 
   // The expected video codecs are the common video codecs from the first
@@ -1786,6 +1797,64 @@ TEST_F(MediaSessionDescriptionFactoryTest, TestCryptoWithOfferBundle) {
 // the common set of the available cryptos.
 TEST_F(MediaSessionDescriptionFactoryTest, TestCryptoWithAnswerBundle) {
   TestCryptoWithBundle(false);
+}
+
+// Verifies that creating answer fails if the offer has UDP/TLS/RTP/SAVPF but
+// DTLS is not enabled locally.
+TEST_F(MediaSessionDescriptionFactoryTest,
+       TestOfferDtlsSavpfWithoutDtlsFailed) {
+  f1_.set_secure(SEC_ENABLED);
+  f2_.set_secure(SEC_ENABLED);
+  tdf1_.set_secure(SEC_DISABLED);
+  tdf2_.set_secure(SEC_DISABLED);
+
+  talk_base::scoped_ptr<SessionDescription> offer(
+      f1_.CreateOffer(MediaSessionOptions(), NULL));
+  ASSERT_TRUE(offer.get() != NULL);
+  ContentInfo* offer_content = offer->GetContentByName("audio");
+  ASSERT_TRUE(offer_content != NULL);
+  AudioContentDescription* offer_audio_desc =
+      static_cast<AudioContentDescription*>(offer_content->description);
+  offer_audio_desc->set_protocol(cricket::kMediaProtocolDtlsSavpf);
+
+  talk_base::scoped_ptr<SessionDescription> answer(
+      f2_.CreateAnswer(offer.get(), MediaSessionOptions(), NULL));
+  ASSERT_TRUE(answer != NULL);
+  ContentInfo* answer_content = answer->GetContentByName("audio");
+  ASSERT_TRUE(answer_content != NULL);
+
+  ASSERT_TRUE(answer_content->rejected);
+}
+
+// Offers UDP/TLS/RTP/SAVPF and verifies the answer can be created and contains
+// UDP/TLS/RTP/SAVPF.
+TEST_F(MediaSessionDescriptionFactoryTest, TestOfferDtlsSavpfCreateAnswer) {
+  f1_.set_secure(SEC_ENABLED);
+  f2_.set_secure(SEC_ENABLED);
+  tdf1_.set_secure(SEC_ENABLED);
+  tdf2_.set_secure(SEC_ENABLED);
+
+  talk_base::scoped_ptr<SessionDescription> offer(
+      f1_.CreateOffer(MediaSessionOptions(), NULL));
+  ASSERT_TRUE(offer.get() != NULL);
+  ContentInfo* offer_content = offer->GetContentByName("audio");
+  ASSERT_TRUE(offer_content != NULL);
+  AudioContentDescription* offer_audio_desc =
+      static_cast<AudioContentDescription*>(offer_content->description);
+  offer_audio_desc->set_protocol(cricket::kMediaProtocolDtlsSavpf);
+
+  talk_base::scoped_ptr<SessionDescription> answer(
+      f2_.CreateAnswer(offer.get(), MediaSessionOptions(), NULL));
+  ASSERT_TRUE(answer != NULL);
+
+  const ContentInfo* answer_content = answer->GetContentByName("audio");
+  ASSERT_TRUE(answer_content != NULL);
+  ASSERT_FALSE(answer_content->rejected);
+
+  const AudioContentDescription* answer_audio_desc =
+      static_cast<const AudioContentDescription*>(answer_content->description);
+  EXPECT_EQ(std::string(cricket::kMediaProtocolDtlsSavpf),
+                        answer_audio_desc->protocol());
 }
 
 // Test that we include both SDES and DTLS in the offer, but only include SDES

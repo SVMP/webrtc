@@ -25,7 +25,14 @@ const char* Version();
 
 class PacketReceiver {
  public:
-  virtual bool DeliverPacket(const uint8_t* packet, size_t length) = 0;
+  enum DeliveryStatus {
+    DELIVERY_OK,
+    DELIVERY_UNKNOWN_SSRC,
+    DELIVERY_PACKET_ERROR,
+  };
+
+  virtual DeliveryStatus DeliverPacket(const uint8_t* packet,
+                                       size_t length) = 0;
 
  protected:
   virtual ~PacketReceiver() {}
@@ -54,9 +61,8 @@ class Call {
         : webrtc_config(NULL),
           send_transport(send_transport),
           voice_engine(NULL),
-          trace_callback(NULL),
-          trace_filter(kTraceDefault),
-          overuse_callback(NULL) {}
+          overuse_callback(NULL),
+          start_bitrate_bps(-1) {}
 
     webrtc::Config* webrtc_config;
 
@@ -65,12 +71,14 @@ class Call {
     // VoiceEngine used for audio/video synchronization for this Call.
     VoiceEngine* voice_engine;
 
-    TraceCallback* trace_callback;
-    uint32_t trace_filter;
-
     // Callback for overuse and normal usage based on the jitter of incoming
     // captured frames. 'NULL' disables the callback.
     OveruseCallback* overuse_callback;
+
+    // Start bitrate used before a valid bitrate estimate is calculated. '-1'
+    // lets the call decide start bitrate.
+    // Note: This currently only affects video.
+    int start_bitrate_bps;
   };
 
   static Call* Create(const Call::Config& config);
@@ -81,7 +89,9 @@ class Call {
   virtual VideoSendStream::Config GetDefaultSendConfig() = 0;
 
   virtual VideoSendStream* CreateVideoSendStream(
-      const VideoSendStream::Config& config) = 0;
+      const VideoSendStream::Config& config,
+      const std::vector<VideoStream>& video_streams,
+      const void* encoder_settings) = 0;
 
   virtual void DestroyVideoSendStream(VideoSendStream* send_stream) = 0;
 

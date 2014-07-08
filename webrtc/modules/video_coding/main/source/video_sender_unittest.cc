@@ -173,7 +173,7 @@ class TestVideoSender : public ::testing::Test {
   TestVideoSender() : clock_(1000), packetization_callback_(&clock_) {}
 
   virtual void SetUp() {
-    sender_.reset(new VideoSender(0, &clock_, &post_encode_callback_));
+    sender_.reset(new VideoSender(&clock_, &post_encode_callback_));
     EXPECT_EQ(0, sender_->InitializeSender());
     EXPECT_EQ(0, sender_->RegisterTransportCallback(&packetization_callback_));
   }
@@ -345,6 +345,8 @@ class TestVideoSenderWithVp8 : public TestVideoSender {
   void InsertFrames(float framerate, float seconds) {
     for (int i = 0; i < seconds * framerate; ++i) {
       clock_.AdvanceTimeMilliseconds(1000.0f / framerate);
+      EXPECT_CALL(post_encode_callback_, Encoded(_, NULL, NULL))
+          .WillOnce(Return(0));
       AddFrame();
 
       // SetChannelParameters needs to be called frequently to propagate

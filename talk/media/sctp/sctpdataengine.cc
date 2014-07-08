@@ -105,12 +105,6 @@ namespace cricket {
 typedef talk_base::ScopedMessageData<SctpInboundPacket> InboundPacketMessage;
 typedef talk_base::ScopedMessageData<talk_base::Buffer> OutboundPacketMessage;
 
-// This is the SCTP port to use. It is passed along the wire and the listener
-// and connector must be using the same port. It is not related to the ports at
-// the IP level. (Corresponds to: sockaddr_conn.sconn_port in usrsctp.h)
-//
-// TODO(ldixon): Allow port to be set from higher level code.
-static const int kSctpDefaultPort = 5001;
 // TODO(ldixon): Find where this is defined, and also check is Sctp really
 // respects this.
 static const size_t kSctpMtu = 1280;
@@ -277,25 +271,26 @@ SctpDataEngine::SctpDataEngine() {
   }
   usrsctp_engines_count++;
 
-  // We don't put in a codec because we don't want one offered when we
-  // use the hybrid data engine.
-  // codecs_.push_back(cricket::DataCodec( kGoogleSctpDataCodecId,
-  // kGoogleSctpDataCodecName, 0));
+  cricket::DataCodec codec(kGoogleSctpDataCodecId, kGoogleSctpDataCodecName, 0);
+  codec.SetParam(kCodecParamPort, kSctpDefaultPort);
+  codecs_.push_back(codec);
 }
 
 SctpDataEngine::~SctpDataEngine() {
-  // TODO(ldixon): There is currently a bug in teardown of usrsctp that blocks
-  // indefintely if a finish call made too soon after close calls. So teardown
-  // has been skipped. Once the bug is fixed, retest and enable teardown.
-  // Tracked in webrtc issue 2749.
-  //
-  // usrsctp_engines_count--;
-  // LOG(LS_VERBOSE) << "usrsctp_engines_count:" << usrsctp_engines_count;
-  // if (usrsctp_engines_count == 0) {
-  //   if (usrsctp_finish() != 0) {
-  //     LOG(LS_WARNING) << "usrsctp_finish.";
-  //   }
-  // }
+  usrsctp_engines_count--;
+  LOG(LS_VERBOSE) << "usrsctp_engines_count:" << usrsctp_engines_count;
+
+  if (usrsctp_engines_count == 0) {
+    // usrsctp_finish() may fail if it's called too soon after the channels are
+    // closed. Wait and try again until it succeeds for up to 3 seconds.
+    for (size_t i = 0; i < 300; ++i) {
+      if (usrsctp_finish() == 0)
+        return;
+
+      talk_base::Thread::SleepMs(10);
+    }
+    LOG(LS_ERROR) << "Failed to shutdown usrsctp.";
+  }
 }
 
 DataMediaChannel* SctpDataEngine::CreateChannel(
@@ -308,8 +303,8 @@ DataMediaChannel* SctpDataEngine::CreateChannel(
 
 SctpDataMediaChannel::SctpDataMediaChannel(talk_base::Thread* thread)
     : worker_thread_(thread),
-      local_port_(-1),
-      remote_port_(-1),
+      local_port_(kSctpDefaultPort),
+      remote_port_(kSctpDefaultPort),
       sock_(NULL),
       sending_(false),
       receiving_(false),
@@ -423,12 +418,6 @@ void SctpDataMediaChannel::CloseSctpSocket() {
 
 bool SctpDataMediaChannel::Connect() {
   LOG(LS_VERBOSE) << debug_name_ << "->Connect().";
-  if (remote_port_ < 0) {
-    remote_port_ = kSctpDefaultPort;
-  }
-  if (local_port_ < 0) {
-    local_port_ = kSctpDefaultPort;
-  }
 
   // If we already have a socket connection, just return.
   if (sock_) {
@@ -565,7 +554,7 @@ bool SctpDataMediaChannel::SendData(
                            talk_base::checked_cast<socklen_t>(sizeof(spa)),
                            SCTP_SENDV_SPA, 0);
   if (send_res < 0) {
-    if (errno == EWOULDBLOCK) {
+    if (errno == SCTP_EWOULDBLOCK) {
       *result = SDR_BLOCK;
       LOG(LS_INFO) << debug_name_ << "->SendData(...): EWOULDBLOCK returned";
     } else {
@@ -794,7 +783,6 @@ void SctpDataMediaChannel::OnStreamResetEvent(
                   << ListStreams(open_streams_) << "], Q'd: ["
                   << ListStreams(queued_reset_streams_) << "], Sent: ["
                   << ListStreams(sent_reset_streams_) << "]";
-  bool local_stream_reset_acknowledged = false;
 
   // If both sides try to reset some streams at the same time (even if they're
   // disjoint sets), we can get reset failures.
@@ -805,7 +793,6 @@ void SctpDataMediaChannel::OnStreamResetEvent(
         sent_reset_streams_.begin(),
         sent_reset_streams_.end());
     sent_reset_streams_.clear();
-    local_stream_reset_acknowledged = true;
 
   } else if (evt->strreset_flags & SCTP_STREAM_RESET_INCOMING_SSN) {
     // Each side gets an event for each direction of a stream.  That is,
@@ -822,7 +809,6 @@ void SctpDataMediaChannel::OnStreamResetEvent(
       if (it != sent_reset_streams_.end()) {
         LOG(LS_VERBOSE) << "SCTP_STREAM_RESET_EVENT(" << debug_name_
                         << "): local sid " << stream_id << " acknowledged.";
-        local_stream_reset_acknowledged = true;
         sent_reset_streams_.erase(it);
 
       } else if ((it = open_streams_.find(stream_id))
@@ -831,7 +817,7 @@ void SctpDataMediaChannel::OnStreamResetEvent(
         LOG(LS_VERBOSE) << "SCTP_STREAM_RESET_EVENT(" << debug_name_
                         << "): closing sid " << stream_id;
         open_streams_.erase(it);
-        SignalStreamClosed(stream_id);
+        SignalStreamClosedRemotely(stream_id);
 
       } else if ((it = queued_reset_streams_.find(stream_id))
                  != queued_reset_streams_.end()) {
@@ -853,11 +839,9 @@ void SctpDataMediaChannel::OnStreamResetEvent(
     }
   }
 
-  if (local_stream_reset_acknowledged) {
-    // This message acknowledges the last stream-reset request we sent out
-    // (only one can be outstanding at a time).  Send out the next one.
-    SendQueuedStreamResets();
-  }
+  // Always try to send the queued RESET because this call indicates that the
+  // last local RESET or remote RESET has made some progress.
+  SendQueuedStreamResets();
 }
 
 // Puts the specified |param| from the codec identified by |id| into |dest|

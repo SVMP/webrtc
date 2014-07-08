@@ -40,4 +40,8 @@
   return self;
 }
 
+- (NSString*)description {
+  return [NSString stringWithFormat:@"%@: %@", _key, _value];
+}
+
 @end

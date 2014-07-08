@@ -16,13 +16,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include "webrtc/call.h"
-#include "webrtc/common.h"
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
-#include "webrtc/modules/remote_bitrate_estimator/include/rtp_to_ntp.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_utility.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/rtp_to_ntp.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/thread_annotations.h"
 #include "webrtc/test/direct_transport.h"
 #include "webrtc/test/encoder_settings.h"
 #include "webrtc/test/fake_audio_device.h"
@@ -53,34 +53,42 @@ class CallPerfTest : public ::testing::Test {
       : send_stream_(NULL), fake_encoder_(Clock::GetRealTimeClock()) {}
 
  protected:
-  VideoSendStream::Config GetSendTestConfig(Call* call) {
-    VideoSendStream::Config config = call->GetDefaultSendConfig();
-    config.rtp.ssrcs.push_back(kSendSsrc);
-    config.encoder_settings = test::CreateEncoderSettings(
-        &fake_encoder_, "FAKE", kSendPayloadType, 1);
-    return config;
+  void CreateTestConfig(Call* call) {
+    send_config_ = call->GetDefaultSendConfig();
+    send_config_.rtp.ssrcs.push_back(kSendSsrc);
+    send_config_.encoder_settings.encoder = &fake_encoder_;
+    send_config_.encoder_settings.payload_type = kSendPayloadType;
+    send_config_.encoder_settings.payload_name = "FAKE";
+    video_streams_ = test::CreateVideoStreams(1);
   }
 
   void RunVideoSendTest(Call* call,
                         const VideoSendStream::Config& config,
                         test::RtpRtcpObserver* observer) {
-    send_stream_ = call->CreateVideoSendStream(config);
+    send_stream_ = call->CreateVideoSendStream(config, video_streams_, NULL);
     scoped_ptr<test::FrameGeneratorCapturer> frame_generator_capturer(
         test::FrameGeneratorCapturer::Create(
             send_stream_->Input(), 320, 240, 30, Clock::GetRealTimeClock()));
-    send_stream_->StartSending();
+    send_stream_->Start();
     frame_generator_capturer->Start();
 
     EXPECT_EQ(kEventSignaled, observer->Wait());
 
     observer->StopSending();
     frame_generator_capturer->Stop();
-    send_stream_->StopSending();
+    send_stream_->Stop();
     call->DestroyVideoSendStream(send_stream_);
   }
 
   void TestMinTransmitBitrate(bool pad_to_min_bitrate);
 
+  void TestCaptureNtpTime(const FakeNetworkPipe::Config& net_config,
+                          int threshold_ms,
+                          int start_time_ms,
+                          int run_time_ms);
+
+  VideoSendStream::Config send_config_;
+  std::vector<VideoStream> video_streams_;
   VideoSendStream* send_stream_;
   test::FakeEncoder fake_encoder_;
 };
@@ -89,7 +97,7 @@ class SyncRtcpObserver : public test::RtpRtcpObserver {
  public:
   explicit SyncRtcpObserver(const FakeNetworkPipe::Config& config)
       : test::RtpRtcpObserver(kLongTimeoutMs, config),
-        critical_section_(CriticalSectionWrapper::CreateCriticalSection()) {}
+        crit_(CriticalSectionWrapper::CreateCriticalSection()) {}
 
   virtual Action OnSendRtcp(const uint8_t* packet, size_t length) OVERRIDE {
     RTCPUtility::RTCPParserV2 parser(packet, length, true);
@@ -100,7 +108,7 @@ class SyncRtcpObserver : public test::RtpRtcpObserver {
          packet_type = parser.Iterate()) {
       if (packet_type == RTCPUtility::kRtcpSrCode) {
         const RTCPUtility::RTCPPacket& packet = parser.Packet();
-        synchronization::RtcpMeasurement ntp_rtp_pair(
+        RtcpMeasurement ntp_rtp_pair(
             packet.SR.NTPMostSignificant,
             packet.SR.NTPLeastSignificant,
             packet.SR.RTPTimestamp);
@@ -111,22 +119,22 @@ class SyncRtcpObserver : public test::RtpRtcpObserver {
   }
 
   int64_t RtpTimestampToNtp(uint32_t timestamp) const {
-    CriticalSectionScoped cs(critical_section_.get());
+    CriticalSectionScoped lock(crit_.get());
     int64_t timestamp_in_ms = -1;
     if (ntp_rtp_pairs_.size() == 2) {
       // TODO(stefan): We can't EXPECT_TRUE on this call due to a bug in the
       // RTCP sender where it sends RTCP SR before any RTP packets, which leads
       // to a bogus NTP/RTP mapping.
-      synchronization::RtpToNtpMs(timestamp, ntp_rtp_pairs_, &timestamp_in_ms);
+      RtpToNtpMs(timestamp, ntp_rtp_pairs_, &timestamp_in_ms);
       return timestamp_in_ms;
     }
     return -1;
   }
 
  private:
-  void StoreNtpRtpPair(synchronization::RtcpMeasurement ntp_rtp_pair) {
-    CriticalSectionScoped cs(critical_section_.get());
-    for (synchronization::RtcpList::iterator it = ntp_rtp_pairs_.begin();
+  void StoreNtpRtpPair(RtcpMeasurement ntp_rtp_pair) {
+    CriticalSectionScoped lock(crit_.get());
+    for (RtcpList::iterator it = ntp_rtp_pairs_.begin();
          it != ntp_rtp_pairs_.end();
          ++it) {
       if (ntp_rtp_pair.ntp_secs == it->ntp_secs &&
@@ -143,8 +151,8 @@ class SyncRtcpObserver : public test::RtpRtcpObserver {
     ntp_rtp_pairs_.push_front(ntp_rtp_pair);
   }
 
-  scoped_ptr<CriticalSectionWrapper> critical_section_;
-  synchronization::RtcpList ntp_rtp_pairs_;
+  const scoped_ptr<CriticalSectionWrapper> crit_;
+  RtcpList ntp_rtp_pairs_ GUARDED_BY(crit_);
 };
 
 class VideoRtcpAndSyncObserver : public SyncRtcpObserver, public VideoRenderer {
@@ -156,16 +164,14 @@ class VideoRtcpAndSyncObserver : public SyncRtcpObserver, public VideoRenderer {
   VideoRtcpAndSyncObserver(Clock* clock,
                            int voe_channel,
                            VoEVideoSync* voe_sync,
-                           SyncRtcpObserver* audio_observer,
-                           bool using_new_acm)
+                           SyncRtcpObserver* audio_observer)
       : SyncRtcpObserver(FakeNetworkPipe::Config()),
         clock_(clock),
         voe_channel_(voe_channel),
         voe_sync_(voe_sync),
         audio_observer_(audio_observer),
         creation_time_ms_(clock_->TimeInMilliseconds()),
-        first_time_in_sync_(-1),
-        using_new_acm_(using_new_acm) {}
+        first_time_in_sync_(-1) {}
 
   virtual void RenderFrame(const I420VideoFrame& video_frame,
                            int time_to_render_ms) OVERRIDE {
@@ -184,12 +190,8 @@ class VideoRtcpAndSyncObserver : public SyncRtcpObserver, public VideoRenderer {
     int64_t stream_offset = latest_audio_ntp - latest_video_ntp;
     std::stringstream ss;
     ss << stream_offset;
-    std::stringstream acm_type;
-    if (using_new_acm_) {
-      acm_type << "_acm2";
-    }
     webrtc::test::PrintResult("stream_offset",
-                              acm_type.str(),
+                              "",
                               "synchronization",
                               ss.str(),
                               "ms",
@@ -203,7 +205,7 @@ class VideoRtcpAndSyncObserver : public SyncRtcpObserver, public VideoRenderer {
       if (first_time_in_sync_ == -1) {
         first_time_in_sync_ = now_ms;
         webrtc::test::PrintResult("sync_convergence_time",
-                                  acm_type.str(),
+                                  "",
                                   "synchronization",
                                   time_since_creation,
                                   "ms",
@@ -215,25 +217,15 @@ class VideoRtcpAndSyncObserver : public SyncRtcpObserver, public VideoRenderer {
   }
 
  private:
-  Clock* clock_;
+  Clock* const clock_;
   int voe_channel_;
   VoEVideoSync* voe_sync_;
   SyncRtcpObserver* audio_observer_;
   int64_t creation_time_ms_;
   int64_t first_time_in_sync_;
-  bool using_new_acm_;
 };
 
-class ParamCallPerfTest : public CallPerfTest,
-                          public ::testing::WithParamInterface<bool> {
- public:
-  ParamCallPerfTest() : CallPerfTest(), use_new_acm_(GetParam()) {}
-
- protected:
-  bool use_new_acm_;
-};
-
-TEST_P(ParamCallPerfTest, PlaysOutAudioAndVideoInSync) {
+TEST_F(CallPerfTest, PlaysOutAudioAndVideoInSync) {
   VoiceEngine* voice_engine = VoiceEngine::Create();
   VoEBase* voe_base = VoEBase::GetInterface(voice_engine);
   VoECodec* voe_codec = VoECodec::GetInterface(voice_engine);
@@ -245,15 +237,7 @@ TEST_P(ParamCallPerfTest, PlaysOutAudioAndVideoInSync) {
   test::FakeAudioDevice fake_audio_device(Clock::GetRealTimeClock(),
                                           audio_filename);
   EXPECT_EQ(0, voe_base->Init(&fake_audio_device, NULL));
-  Config config;
-  if (use_new_acm_) {
-    config.Set<webrtc::AudioCodingModuleFactory>(
-        new webrtc::NewAudioCodingModuleFactory());
-  } else {
-    config.Set<webrtc::AudioCodingModuleFactory>(
-        new webrtc::AudioCodingModuleFactory());
-  }
-  int channel = voe_base->CreateChannel(config);
+  int channel = voe_base->CreateChannel();
 
   FakeNetworkPipe::Config net_config;
   net_config.queue_delay_ms = 500;
@@ -261,8 +245,7 @@ TEST_P(ParamCallPerfTest, PlaysOutAudioAndVideoInSync) {
   VideoRtcpAndSyncObserver observer(Clock::GetRealTimeClock(),
                                     channel,
                                     voe_sync,
-                                    &audio_observer,
-                                    use_new_acm_);
+                                    &audio_observer);
 
   Call::Config receiver_config(observer.ReceiveTransport());
   receiver_config.voice_engine = voice_engine;
@@ -278,7 +261,8 @@ TEST_P(ParamCallPerfTest, PlaysOutAudioAndVideoInSync) {
         : channel_(channel),
           voe_network_(voe_network),
           parser_(RtpHeaderParser::Create()) {}
-    virtual bool DeliverPacket(const uint8_t* packet, size_t length) {
+    virtual DeliveryStatus DeliverPacket(const uint8_t* packet,
+                                         size_t length) OVERRIDE {
       int ret;
       if (parser_->IsRtcp(packet, static_cast<int>(length))) {
         ret = voe_network_->ReceivedRTCPPacket(
@@ -287,7 +271,7 @@ TEST_P(ParamCallPerfTest, PlaysOutAudioAndVideoInSync) {
         ret = voe_network_->ReceivedRTPPacket(
             channel_, packet, static_cast<unsigned int>(length), PacketTime());
       }
-      return ret == 0;
+      return ret == 0 ? DELIVERY_OK : DELIVERY_PACKET_ERROR;
     }
 
    private:
@@ -307,37 +291,36 @@ TEST_P(ParamCallPerfTest, PlaysOutAudioAndVideoInSync) {
 
   test::FakeDecoder fake_decoder;
 
-  VideoSendStream::Config send_config = GetSendTestConfig(sender_call.get());
+  CreateTestConfig(sender_call.get());
 
   VideoReceiveStream::Config receive_config =
       receiver_call->GetDefaultReceiveConfig();
   assert(receive_config.codecs.empty());
   VideoCodec codec =
-      test::CreateDecoderVideoCodec(send_config.encoder_settings);
+      test::CreateDecoderVideoCodec(send_config_.encoder_settings);
   receive_config.codecs.push_back(codec);
   assert(receive_config.external_decoders.empty());
   ExternalVideoDecoder decoder;
   decoder.decoder = &fake_decoder;
-  decoder.payload_type = send_config.encoder_settings.payload_type;
+  decoder.payload_type = send_config_.encoder_settings.payload_type;
   receive_config.external_decoders.push_back(decoder);
-  receive_config.rtp.remote_ssrc = send_config.rtp.ssrcs[0];
+  receive_config.rtp.remote_ssrc = send_config_.rtp.ssrcs[0];
   receive_config.rtp.local_ssrc = kReceiverLocalSsrc;
   receive_config.renderer = &observer;
   receive_config.audio_channel_id = channel;
 
   VideoSendStream* send_stream =
-      sender_call->CreateVideoSendStream(send_config);
+      sender_call->CreateVideoSendStream(send_config_, video_streams_, NULL);
   VideoReceiveStream* receive_stream =
       receiver_call->CreateVideoReceiveStream(receive_config);
   scoped_ptr<test::FrameGeneratorCapturer> capturer(
-      test::FrameGeneratorCapturer::Create(
-          send_stream->Input(),
-          send_config.encoder_settings.streams[0].width,
-          send_config.encoder_settings.streams[0].height,
-          30,
-          Clock::GetRealTimeClock()));
-  receive_stream->StartReceiving();
-  send_stream->StartSending();
+      test::FrameGeneratorCapturer::Create(send_stream->Input(),
+                                           video_streams_[0].width,
+                                           video_streams_[0].height,
+                                           30,
+                                           Clock::GetRealTimeClock()));
+  receive_stream->Start();
+  send_stream->Start();
   capturer->Start();
 
   fake_audio_device.Start();
@@ -354,8 +337,8 @@ TEST_P(ParamCallPerfTest, PlaysOutAudioAndVideoInSync) {
   fake_audio_device.Stop();
 
   capturer->Stop();
-  send_stream->StopSending();
-  receive_stream->StopReceiving();
+  send_stream->Stop();
+  receive_stream->Stop();
   observer.StopSending();
   audio_observer.StopSending();
 
@@ -369,8 +352,193 @@ TEST_P(ParamCallPerfTest, PlaysOutAudioAndVideoInSync) {
   VoiceEngine::Delete(voice_engine);
 }
 
-// Test with both ACM1 and ACM2.
-INSTANTIATE_TEST_CASE_P(SwitchAcm, ParamCallPerfTest, ::testing::Bool());
+class CaptureNtpTimeObserver : public test::RtpRtcpObserver,
+                               public VideoRenderer {
+ public:
+  CaptureNtpTimeObserver(Clock* clock,
+                         const FakeNetworkPipe::Config& config,
+                         int threshold_ms,
+                         int start_time_ms,
+                         int run_time_ms)
+      : RtpRtcpObserver(kLongTimeoutMs, config),
+        clock_(clock),
+        threshold_ms_(threshold_ms),
+        start_time_ms_(start_time_ms),
+        run_time_ms_(run_time_ms),
+        creation_time_ms_(clock_->TimeInMilliseconds()),
+        capturer_(NULL),
+        rtp_start_timestamp_set_(false),
+        rtp_start_timestamp_(0) {}
+
+  virtual void RenderFrame(const I420VideoFrame& video_frame,
+                           int time_to_render_ms) OVERRIDE {
+    if (video_frame.ntp_time_ms() <= 0) {
+      // Haven't got enough RTCP SR in order to calculate the capture ntp time.
+      return;
+    }
+
+    int64_t now_ms = clock_->TimeInMilliseconds();
+    int64_t time_since_creation = now_ms - creation_time_ms_;
+    if (time_since_creation < start_time_ms_) {
+      // Wait for |start_time_ms_| before start measuring.
+      return;
+    }
+
+    if (time_since_creation > run_time_ms_) {
+      observation_complete_->Set();
+    }
+
+    FrameCaptureTimeList::iterator iter =
+        capture_time_list_.find(video_frame.timestamp());
+    EXPECT_TRUE(iter != capture_time_list_.end());
+
+    // The real capture time has been wrapped to uint32_t before converted
+    // to rtp timestamp in the sender side. So here we convert the estimated
+    // capture time to a uint32_t 90k timestamp also for comparing.
+    uint32_t estimated_capture_timestamp =
+        90 * static_cast<uint32_t>(video_frame.ntp_time_ms());
+    uint32_t real_capture_timestamp = iter->second;
+    int time_offset_ms = real_capture_timestamp - estimated_capture_timestamp;
+    time_offset_ms = time_offset_ms / 90;
+    std::stringstream ss;
+    ss << time_offset_ms;
+
+    webrtc::test::PrintResult("capture_ntp_time",
+                              "",
+                              "real - estimated",
+                              ss.str(),
+                              "ms",
+                              true);
+    EXPECT_TRUE(std::abs(time_offset_ms) < threshold_ms_);
+  }
+
+  virtual Action OnSendRtp(const uint8_t* packet, size_t length) {
+    RTPHeader header;
+    EXPECT_TRUE(parser_->Parse(packet, static_cast<int>(length), &header));
+
+    if (!rtp_start_timestamp_set_) {
+      // Calculate the rtp timestamp offset in order to calculate the real
+      // capture time.
+      uint32_t first_capture_timestamp =
+          90 * static_cast<uint32_t>(capturer_->first_frame_capture_time());
+      rtp_start_timestamp_ = header.timestamp - first_capture_timestamp;
+      rtp_start_timestamp_set_ = true;
+    }
+
+    uint32_t capture_timestamp = header.timestamp - rtp_start_timestamp_;
+    capture_time_list_.insert(capture_time_list_.end(),
+                              std::make_pair(header.timestamp,
+                                             capture_timestamp));
+    return SEND_PACKET;
+  }
+
+  void SetCapturer(test::FrameGeneratorCapturer* capturer) {
+    capturer_ = capturer;
+  }
+
+ private:
+  Clock* clock_;
+  int threshold_ms_;
+  int start_time_ms_;
+  int run_time_ms_;
+  int64_t creation_time_ms_;
+  test::FrameGeneratorCapturer* capturer_;
+  bool rtp_start_timestamp_set_;
+  uint32_t rtp_start_timestamp_;
+  typedef std::map<uint32_t, uint32_t> FrameCaptureTimeList;
+  FrameCaptureTimeList capture_time_list_;
+};
+
+void CallPerfTest::TestCaptureNtpTime(const FakeNetworkPipe::Config& net_config,
+                                      int threshold_ms,
+                                      int start_time_ms,
+                                      int run_time_ms) {
+  CaptureNtpTimeObserver observer(Clock::GetRealTimeClock(),
+                                  net_config,
+                                  threshold_ms,
+                                  start_time_ms,
+                                  run_time_ms);
+
+  // Sender/receiver call.
+  Call::Config receiver_config(observer.ReceiveTransport());
+  scoped_ptr<Call> receiver_call(Call::Create(receiver_config));
+  scoped_ptr<Call> sender_call(
+      Call::Create(Call::Config(observer.SendTransport())));
+  observer.SetReceivers(receiver_call->Receiver(), sender_call->Receiver());
+
+  // Configure send stream.
+  CreateTestConfig(sender_call.get());
+  VideoSendStream* send_stream =
+      sender_call->CreateVideoSendStream(send_config_, video_streams_, NULL);
+  scoped_ptr<test::FrameGeneratorCapturer> capturer(
+      test::FrameGeneratorCapturer::Create(send_stream->Input(),
+                                           video_streams_[0].width,
+                                           video_streams_[0].height,
+                                           30,
+                                           Clock::GetRealTimeClock()));
+  observer.SetCapturer(capturer.get());
+
+  // Configure receive stream.
+  VideoReceiveStream::Config receive_config =
+      receiver_call->GetDefaultReceiveConfig();
+  assert(receive_config.codecs.empty());
+  VideoCodec codec =
+      test::CreateDecoderVideoCodec(send_config_.encoder_settings);
+  receive_config.codecs.push_back(codec);
+  assert(receive_config.external_decoders.empty());
+  ExternalVideoDecoder decoder;
+  test::FakeDecoder fake_decoder;
+  decoder.decoder = &fake_decoder;
+  decoder.payload_type = send_config_.encoder_settings.payload_type;
+  receive_config.external_decoders.push_back(decoder);
+  receive_config.rtp.remote_ssrc = send_config_.rtp.ssrcs[0];
+  receive_config.rtp.local_ssrc = kReceiverLocalSsrc;
+  receive_config.renderer = &observer;
+  // Enable the receiver side rtt calculation.
+  receive_config.rtp.rtcp_xr.receiver_reference_time_report = true;
+  VideoReceiveStream* receive_stream =
+      receiver_call->CreateVideoReceiveStream(receive_config);
+
+  // Start the test
+  receive_stream->Start();
+  send_stream->Start();
+  capturer->Start();
+
+  EXPECT_EQ(kEventSignaled, observer.Wait())
+      << "Timed out while waiting for estimated capture ntp time to be "
+      << "within bounds.";
+
+  capturer->Stop();
+  send_stream->Stop();
+  receive_stream->Stop();
+  observer.StopSending();
+
+  sender_call->DestroyVideoSendStream(send_stream);
+  receiver_call->DestroyVideoReceiveStream(receive_stream);
+}
+
+TEST_F(CallPerfTest, CaptureNtpTimeWithNetworkDelay) {
+  FakeNetworkPipe::Config net_config;
+  net_config.queue_delay_ms = 100;
+  // TODO(wu): lower the threshold as the calculation/estimatation becomes more
+  // accurate.
+  const int kThresholdMs = 100;
+  const int kStartTimeMs = 10000;
+  const int kRunTimeMs = 20000;
+  TestCaptureNtpTime(net_config, kThresholdMs, kStartTimeMs, kRunTimeMs);
+}
+
+TEST_F(CallPerfTest, CaptureNtpTimeWithNetworkJitter) {
+  FakeNetworkPipe::Config net_config;
+  net_config.queue_delay_ms = 100;
+  net_config.delay_standard_deviation_ms = 10;
+  // TODO(wu): lower the threshold as the calculation/estimatation becomes more
+  // accurate.
+  const int kThresholdMs = 100;
+  const int kStartTimeMs = 10000;
+  const int kRunTimeMs = 20000;
+  TestCaptureNtpTime(net_config, kThresholdMs, kStartTimeMs, kRunTimeMs);
+}
 
 TEST_F(CallPerfTest, RegisterCpuOveruseObserver) {
   // Verifies that either a normal or overuse callback is triggered.
@@ -392,8 +560,8 @@ TEST_F(CallPerfTest, RegisterCpuOveruseObserver) {
   call_config.overuse_callback = &observer;
   scoped_ptr<Call> call(Call::Create(call_config));
 
-  VideoSendStream::Config send_config = GetSendTestConfig(call.get());
-  RunVideoSendTest(call.get(), send_config, &observer);
+  CreateTestConfig(call.get());
+  RunVideoSendTest(call.get(), send_config_, &observer);
 }
 
 void CallPerfTest::TestMinTransmitBitrate(bool pad_to_min_bitrate) {
@@ -423,7 +591,8 @@ void CallPerfTest::TestMinTransmitBitrate(bool pad_to_min_bitrate) {
     }
 
    private:
-    virtual bool DeliverPacket(const uint8_t* packet, size_t length) OVERRIDE {
+    virtual DeliveryStatus DeliverPacket(const uint8_t* packet,
+                                         size_t length) OVERRIDE {
       VideoSendStream::Stats stats = send_stream_->GetStats();
       if (stats.substreams.size() > 0) {
         assert(stats.substreams.size() == 1);
@@ -468,53 +637,51 @@ void CallPerfTest::TestMinTransmitBitrate(bool pad_to_min_bitrate) {
   scoped_ptr<Call> receiver_call(
       Call::Create(Call::Config(observer.ReceiveTransport())));
 
-  VideoSendStream::Config send_config = GetSendTestConfig(sender_call.get());
+  CreateTestConfig(sender_call.get());
   fake_encoder_.SetMaxBitrate(kMaxEncodeBitrateKbps);
 
   observer.SetReceivers(receiver_call->Receiver(), sender_call->Receiver());
 
-  send_config.pacing = true;
   if (pad_to_min_bitrate) {
-    send_config.rtp.min_transmit_bitrate_bps = kMinTransmitBitrateBps;
+    send_config_.rtp.min_transmit_bitrate_bps = kMinTransmitBitrateBps;
   } else {
-    assert(send_config.rtp.min_transmit_bitrate_bps == 0);
+    assert(send_config_.rtp.min_transmit_bitrate_bps == 0);
   }
 
   VideoReceiveStream::Config receive_config =
       receiver_call->GetDefaultReceiveConfig();
   receive_config.codecs.clear();
   VideoCodec codec =
-      test::CreateDecoderVideoCodec(send_config.encoder_settings);
+      test::CreateDecoderVideoCodec(send_config_.encoder_settings);
   receive_config.codecs.push_back(codec);
   test::FakeDecoder fake_decoder;
   ExternalVideoDecoder decoder;
   decoder.decoder = &fake_decoder;
-  decoder.payload_type = send_config.encoder_settings.payload_type;
+  decoder.payload_type = send_config_.encoder_settings.payload_type;
   receive_config.external_decoders.push_back(decoder);
-  receive_config.rtp.remote_ssrc = send_config.rtp.ssrcs[0];
+  receive_config.rtp.remote_ssrc = send_config_.rtp.ssrcs[0];
   receive_config.rtp.local_ssrc = kReceiverLocalSsrc;
 
   VideoSendStream* send_stream =
-      sender_call->CreateVideoSendStream(send_config);
+      sender_call->CreateVideoSendStream(send_config_, video_streams_, NULL);
   VideoReceiveStream* receive_stream =
       receiver_call->CreateVideoReceiveStream(receive_config);
   scoped_ptr<test::FrameGeneratorCapturer> capturer(
-      test::FrameGeneratorCapturer::Create(
-          send_stream->Input(),
-          send_config.encoder_settings.streams[0].width,
-          send_config.encoder_settings.streams[0].height,
-          30,
-          Clock::GetRealTimeClock()));
+      test::FrameGeneratorCapturer::Create(send_stream->Input(),
+                                           video_streams_[0].width,
+                                           video_streams_[0].height,
+                                           30,
+                                           Clock::GetRealTimeClock()));
   observer.SetSendStream(send_stream);
-  receive_stream->StartReceiving();
-  send_stream->StartSending();
+  receive_stream->Start();
+  send_stream->Start();
   capturer->Start();
 
   EXPECT_EQ(kEventSignaled, observer.Wait())
       << "Timeout while waiting for send-bitrate stats.";
 
-  send_stream->StopSending();
-  receive_stream->StopReceiving();
+  send_stream->Stop();
+  receive_stream->Stop();
   observer.StopSending();
   capturer->Stop();
   sender_call->DestroyVideoSendStream(send_stream);

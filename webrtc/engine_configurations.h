@@ -63,7 +63,6 @@
 #define WEBRTC_VOICE_ENGINE_AGC                 // Near-end AGC
 #define WEBRTC_VOICE_ENGINE_ECHO                // Near-end AEC
 #define WEBRTC_VOICE_ENGINE_NR                  // Near-end NS
-#define WEBRTC_VOE_EXTERNAL_REC_AND_PLAYOUT
 
 #if !defined(WEBRTC_ANDROID) && !defined(WEBRTC_IOS)
 #define WEBRTC_VOICE_ENGINE_TYPING_DETECTION    // Typing detection
@@ -83,10 +82,6 @@
 #define WEBRTC_VOICE_ENGINE_RTP_RTCP_API
 #define WEBRTC_VOICE_ENGINE_VIDEO_SYNC_API
 #define WEBRTC_VOICE_ENGINE_VOLUME_CONTROL_API
-
-#ifndef WEBRTC_CHROMIUM_BUILD
-#define WEBRTC_VOICE_ENGINE_CALL_REPORT_API
-#endif
 
 // ============================================================================
 //                                 VideoEngine

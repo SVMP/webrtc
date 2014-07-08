@@ -20,8 +20,8 @@
 
 namespace webrtc {
 
-#if defined(ANDROID) && !defined(WEBRTC_CHROMIUM_BUILD)
-int32_t SetCaptureAndroidVM(JavaVM* javaVM);
+#if defined(ANDROID)
+int32_t SetCaptureAndroidVM(JavaVM* javaVM, jobject context);
 #endif
 
 class VideoCaptureModule: public RefCountedModule {

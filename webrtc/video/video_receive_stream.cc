@@ -17,6 +17,7 @@
 
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 #include "webrtc/system_wrappers/interface/clock.h"
+#include "webrtc/system_wrappers/interface/logging.h"
 #include "webrtc/video/receive_statistics_proxy.h"
 #include "webrtc/video_engine/include/vie_base.h"
 #include "webrtc/video_engine/include/vie_capture.h"
@@ -99,6 +100,31 @@ VideoReceiveStream::VideoReceiveStream(webrtc::VideoEngine* video_engine,
 
   codec_ = ViECodec::GetInterface(video_engine);
 
+  if (config_.rtp.fec.ulpfec_payload_type != -1) {
+    // ULPFEC without RED doesn't make sense.
+    assert(config_.rtp.fec.red_payload_type != -1);
+    VideoCodec codec;
+    memset(&codec, 0, sizeof(codec));
+    codec.codecType = kVideoCodecULPFEC;
+    strcpy(codec.plName, "ulpfec");
+    codec.plType = config_.rtp.fec.ulpfec_payload_type;
+    if (codec_->SetReceiveCodec(channel_, codec) != 0) {
+      LOG(LS_ERROR) << "Could not set ULPFEC codec. This shouldn't happen.";
+      abort();
+    }
+  }
+  if (config_.rtp.fec.red_payload_type != -1) {
+    VideoCodec codec;
+    memset(&codec, 0, sizeof(codec));
+    codec.codecType = kVideoCodecRED;
+    strcpy(codec.plName, "red");
+    codec.plType = config_.rtp.fec.red_payload_type;
+    if (codec_->SetReceiveCodec(channel_, codec) != 0) {
+      LOG(LS_ERROR) << "Could not set RED codec. This shouldn't happen.";
+      abort();
+    }
+  }
+
   assert(!config_.codecs.empty());
   for (size_t i = 0; i < config_.codecs.size(); ++i) {
     if (codec_->SetReceiveCodec(channel_, config_.codecs[i]) != 0) {
@@ -124,13 +150,13 @@ VideoReceiveStream::VideoReceiveStream(webrtc::VideoEngine* video_engine,
 
   external_codec_ = ViEExternalCodec::GetInterface(video_engine);
   for (size_t i = 0; i < config_.external_decoders.size(); ++i) {
-    ExternalVideoDecoder* decoder = &config_.external_decoders[i];
+    const ExternalVideoDecoder& decoder = config_.external_decoders[i];
     if (external_codec_->RegisterExternalReceiveCodec(
             channel_,
-            decoder->payload_type,
-            decoder->decoder,
-            decoder->renderer,
-            decoder->expected_delay_ms) != 0) {
+            decoder.payload_type,
+            decoder.decoder,
+            decoder.renderer,
+            decoder.expected_delay_ms) != 0) {
       // TODO(pbos): Abort gracefully? Can this be a runtime error?
       abort();
     }
@@ -186,7 +212,7 @@ VideoReceiveStream::~VideoReceiveStream() {
   rtp_rtcp_->Release();
 }
 
-void VideoReceiveStream::StartReceiving() {
+void VideoReceiveStream::Start() {
   transport_adapter_.Enable();
   if (render_->StartRender(channel_) != 0)
     abort();
@@ -194,7 +220,7 @@ void VideoReceiveStream::StartReceiving() {
     abort();
 }
 
-void VideoReceiveStream::StopReceiving() {
+void VideoReceiveStream::Stop() {
   if (render_->StopRender(channel_) != 0)
     abort();
   if (video_engine_base_->StopReceive(channel_) != 0)

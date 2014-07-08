@@ -60,6 +60,7 @@
               'link_settings': {
                 'xcode_settings': {
                   'OTHER_LDFLAGS': [
+                    '-framework CoreVideo',
                     '-framework QTKit',
                   ],
                 },
@@ -167,11 +168,20 @@
     },
   ],
   'conditions': [
+    ['include_tests==1 and build_with_chromium==1 and OS=="android"', {
+      # Use WebRTC capture code for Android APK tests that are built from a
+      # Chromium checkout. Normally when built as a part of Chromium the
+      # Chromium video capture code is used. This overrides the default in
+      # webrtc/build/common.gypi.
+      'variables': {
+        'include_internal_video_capture': 1,
+      },
+    }],
     ['include_tests==1', {
       'targets': [
         {
           'target_name': 'video_capture_tests',
-          'type': 'executable',
+          'type': '<(gtest_target_type)',
           'dependencies': [
             'video_capture_module',
             'webrtc_utility',
@@ -179,6 +189,8 @@
             '<(DEPTH)/testing/gtest.gyp:gtest',
           ],
           'sources': [
+            'ensure_initialized.cc',
+            'ensure_initialized.h',
             'test/video_capture_unittest.cc',
             'test/video_capture_main_mac.mm',
           ],
@@ -196,6 +208,13 @@
                 '-lrt',
                 '-lXext',
                 '-lX11',
+              ],
+            }],
+            # TODO(henrike): remove build_with_chromium==1 when the bots are
+            # using Chromium's buildbots.
+            ['build_with_chromium==1 and OS=="android"', {
+              'dependencies': [
+                '<(DEPTH)/testing/android/native_test.gyp:native_test_native_code',
               ],
             }],
             ['OS=="mac"', {

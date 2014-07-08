@@ -292,7 +292,9 @@ int32_t AudioTransportImpl::NeedMorePlayData(
     const uint8_t nChannels,
     const uint32_t samplesPerSec,
     void* audioSamples,
-    uint32_t& nSamplesOut)
+    uint32_t& nSamplesOut,
+    int64_t* elapsed_time_ms,
+    int64_t* ntp_time_ms)
 {
     if (_fullDuplex)
     {
@@ -542,11 +544,18 @@ int AudioTransportImpl::OnDataAvailable(const int voe_channels[],
   return 0;
 }
 
-void AudioTransportImpl::OnData(int voe_channel,
-                                const void* audio_data,
-                                int bits_per_sample, int sample_rate,
-                                int number_of_channels,
-                                int number_of_frames) {}
+void AudioTransportImpl::PushCaptureData(int voe_channel,
+                                         const void* audio_data,
+                                         int bits_per_sample, int sample_rate,
+                                         int number_of_channels,
+                                         int number_of_frames) {}
+
+void AudioTransportImpl::PullRenderData(int bits_per_sample, int sample_rate,
+                                        int number_of_channels,
+                                        int number_of_frames,
+                                        void* audio_data,
+                                        int64_t* elapsed_time_ms,
+                                        int64_t* ntp_time_ms) {}
 
 FuncTestManager::FuncTestManager() :
     _processThread(NULL),
@@ -2683,7 +2692,7 @@ int32_t FuncTestManager::TestAdvancedMBAPI()
         " from the loudspeaker.\n\
 > Press any key to stop...\n \n");
     PAUSE(DEFAULT_PAUSE_TIME);
-    EXPECT_EQ(0, audioDevice->GetLoudspeakerStatus(loudspeakerOn));
+    EXPECT_EQ(0, audioDevice->GetLoudspeakerStatus(&loudspeakerOn));
     EXPECT_TRUE(loudspeakerOn);
 
     TEST_LOG("Set to not use speaker\n");
@@ -2692,7 +2701,7 @@ int32_t FuncTestManager::TestAdvancedMBAPI()
         " from the loudspeaker.\n\
 > Press any key to stop...\n \n");
     PAUSE(DEFAULT_PAUSE_TIME);
-    EXPECT_EQ(0, audioDevice->GetLoudspeakerStatus(loudspeakerOn));
+    EXPECT_EQ(0, audioDevice->GetLoudspeakerStatus(&loudspeakerOn));
     EXPECT_FALSE(loudspeakerOn);
 #endif
 

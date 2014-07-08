@@ -236,29 +236,6 @@ int OutputMixer::PlayDtmfTone(uint8_t eventCode, int lengthMs,
     return 0;
 }
 
-int OutputMixer::StartPlayingDtmfTone(uint8_t eventCode,
-                                      int attenuationDb)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, -1),
-                 "OutputMixer::StartPlayingDtmfTone()");
-    if (_dtmfGenerator.StartTone(eventCode, attenuationDb) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_STILL_PLAYING_PREV_DTMF,
-            kTraceError,
-            "OutputMixer::StartPlayingDtmfTone())");
-        return -1;
-    }
-    return 0;
-}
-
-int OutputMixer::StopPlayingDtmfTone()
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, -1),
-                 "OutputMixer::StopPlayingDtmfTone()");
-    return (_dtmfGenerator.StopTone());
-}
-
 int32_t
 OutputMixer::SetMixabilityStatus(MixerParticipant& participant,
                                  bool mixable)
@@ -532,7 +509,7 @@ int OutputMixer::GetMixedAudio(int sample_rate_hz,
 }
 
 int32_t
-OutputMixer::DoOperationsOnCombinedSignal()
+OutputMixer::DoOperationsOnCombinedSignal(bool feed_data_to_apm)
 {
     if (_audioFrame.sample_rate_hz_ != _mixingFrequencyHz)
     {
@@ -565,10 +542,8 @@ OutputMixer::DoOperationsOnCombinedSignal()
     }
 
     // --- Far-end Voice Quality Enhancement (AudioProcessing Module)
-    // TODO(ajm): Check with VoEBase if |need_audio_processing| is false.
-    // If so, we don't need to call this method and can avoid the subsequent
-    // resampling. See: https://code.google.com/p/webrtc/issues/detail?id=3147
-    APMAnalyzeReverseStream();
+    if (feed_data_to_apm)
+      APMAnalyzeReverseStream();
 
     // --- External media processing
     {
@@ -604,7 +579,7 @@ void OutputMixer::APMAnalyzeReverseStream() {
   // side. Downmix to mono.
   AudioFrame frame;
   frame.num_channels_ = 1;
-  frame.sample_rate_hz_ = _audioProcessingModulePtr->sample_rate_hz();
+  frame.sample_rate_hz_ = _audioProcessingModulePtr->input_sample_rate_hz();
   RemixAndResample(_audioFrame, &audioproc_resampler_, &frame);
 
   if (_audioProcessingModulePtr->AnalyzeReverseStream(&frame) == -1) {

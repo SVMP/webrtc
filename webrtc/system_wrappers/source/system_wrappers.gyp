@@ -16,6 +16,9 @@
         'spreadsortlib',
         '../interface',
       ],
+      'dependencies': [
+        '../../base/base.gyp:webrtc_base',
+      ],
       'direct_dependent_settings': {
         'include_dirs': [
           '../interface',
@@ -35,23 +38,29 @@
         '../interface/data_log_impl.h',
         '../interface/event_tracer.h',
         '../interface/event_wrapper.h',
+        '../interface/field_trial.h',
         '../interface/file_wrapper.h',
         '../interface/fix_interlocked_exchange_pointer_win.h',
         '../interface/logcat_trace_context.h',
         '../interface/logging.h',
         '../interface/ref_count.h',
+        '../interface/rtp_to_ntp.h',
         '../interface/rw_lock_wrapper.h',
         '../interface/scoped_ptr.h',
         '../interface/scoped_refptr.h',
+        '../interface/scoped_vector.h',
         '../interface/sleep.h',
         '../interface/sort.h',
         '../interface/static_instance.h',
+        '../interface/stl_util.h',
         '../interface/stringize_macros.h',
         '../interface/thread_annotations.h',
         '../interface/thread_wrapper.h',
         '../interface/tick_util.h',
+        '../interface/timestamp_extrapolator.h',
         '../interface/trace.h',
         '../interface/trace_event.h',
+        '../interface/utf_util_win.h',
         'aligned_malloc.cc',
         'atomic32_mac.cc',
         'atomic32_posix.cc',
@@ -84,6 +93,7 @@
         'file_impl.h',
         'logcat_trace_context.cc',
         'logging.cc',
+        'rtp_to_ntp.cc',
         'rw_lock.cc',
         'rw_lock_generic.cc',
         'rw_lock_generic.h',
@@ -100,6 +110,7 @@
         'thread_posix.h',
         'thread_win.cc',
         'thread_win.h',
+        'timestamp_extrapolator.cc',
         'trace_impl.cc',
         'trace_impl.h',
         'trace_posix.cc',
@@ -184,6 +195,15 @@
         4267,  # size_t to int truncation.
         4334,  # Ignore warning on shift operator promotion.
       ],
+    }, {
+      'target_name': 'field_trial_default',
+      'type': 'static_library',
+      'sources': [
+        'field_trial_default.cc',
+      ],
+      'dependencies': [
+        'system_wrappers',
+      ]
     },
   ], # targets
   'conditions': [

@@ -11,6 +11,7 @@
 package org.webrtc.webrtcdemo;
 
 import org.webrtc.videoengine.ViERenderer;
+import org.webrtc.videoengine.VideoCaptureAndroid;
 
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
@@ -18,9 +19,10 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.hardware.Camera;
 import android.hardware.Camera.CameraInfo;
+import android.hardware.Camera;
 import android.hardware.SensorManager;
+import android.media.AudioManager;
 import android.os.Environment;
 import android.util.Log;
 import android.view.OrientationEventListener;
@@ -193,6 +195,10 @@ public class MediaEngine implements VideoDecodeEncodeObserver {
           }
         };
     orientationListener.enable();
+    // Set audio mode to communication
+    AudioManager audioManager =
+        ((AudioManager) context.getSystemService(Context.AUDIO_SERVICE));
+    audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
     // Listen to headset being plugged in/out.
     IntentFilter receiverFilter = new IntentFilter(Intent.ACTION_HEADSET_PLUG);
     headsetListener = new BroadcastReceiver() {
@@ -422,8 +428,9 @@ public class MediaEngine implements VideoDecodeEncodeObserver {
 
   private void updateAudioOutput() {
     boolean useSpeaker = !headsetPluggedIn && speakerEnabled;
-    check(voe.setLoudspeakerStatus(useSpeaker) == 0,
-        "Failed updating loudspeaker");
+    AudioManager audioManager =
+        ((AudioManager) context.getSystemService(Context.AUDIO_SERVICE));
+    audioManager.setSpeakerphoneOn(useSpeaker);
   }
 
   public void startViE() {
@@ -589,9 +596,9 @@ public class MediaEngine implements VideoDecodeEncodeObserver {
     cameraInfo.dispose();
     check(vie.connectCaptureDevice(currentCameraHandle, videoChannel) == 0,
         "Failed to connect capture device");
-    // Camera and preview surface. Note, renderer must be created before
-    // calling StartCapture or |svLocal| won't be able to render.
-    svLocal = ViERenderer.CreateLocalRenderer(context);
+    // Camera and preview surface.
+    svLocal = new SurfaceView(context);
+    VideoCaptureAndroid.setLocalPreview(svLocal.getHolder());
     check(vie.startCapture(currentCameraHandle) == 0, "Failed StartCapture");
     compensateRotation();
   }

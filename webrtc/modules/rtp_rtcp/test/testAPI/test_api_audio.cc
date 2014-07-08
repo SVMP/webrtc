@@ -122,9 +122,9 @@ class RtpRtcpAudioTest : public ::testing::Test {
     receive_statistics2_.reset(ReceiveStatistics::Create(&fake_clock));
 
     rtp_payload_registry1_.reset(new RTPPayloadRegistry(
-        test_id, RTPPayloadStrategy::CreateStrategy(true)));
+        RTPPayloadStrategy::CreateStrategy(true)));
     rtp_payload_registry2_.reset(new RTPPayloadRegistry(
-        test_id, RTPPayloadStrategy::CreateStrategy(true)));
+        RTPPayloadStrategy::CreateStrategy(true)));
 
     RtpRtcp::Configuration configuration;
     configuration.id = test_id;
@@ -189,7 +189,7 @@ class RtpRtcpAudioTest : public ::testing::Test {
 };
 
 TEST_F(RtpRtcpAudioTest, Basic) {
-  EXPECT_EQ(0, module1->SetSSRC(test_ssrc));
+  module1->SetSSRC(test_ssrc);
   EXPECT_EQ(0, module1->SetStartTimestamp(test_timestamp));
 
   // Test detection at the end of a DTMF tone.
@@ -260,7 +260,7 @@ TEST_F(RtpRtcpAudioTest, RED) {
       voice_codec.channels,
       (voice_codec.rate < 0) ? 0 : voice_codec.rate));
 
-  EXPECT_EQ(0, module1->SetSSRC(test_ssrc));
+  module1->SetSSRC(test_ssrc);
   EXPECT_EQ(0, module1->SetStartTimestamp(test_timestamp));
   EXPECT_EQ(0, module1->SetSendingStatus(true));
 
@@ -333,7 +333,7 @@ TEST_F(RtpRtcpAudioTest, DTMF) {
       voice_codec.channels,
       (voice_codec.rate < 0) ? 0 : voice_codec.rate));
 
-  EXPECT_EQ(0, module1->SetSSRC(test_ssrc));
+  module1->SetSSRC(test_ssrc);
   EXPECT_EQ(0, module1->SetStartTimestamp(test_timestamp));
   EXPECT_EQ(0, module1->SetSendingStatus(true));
 

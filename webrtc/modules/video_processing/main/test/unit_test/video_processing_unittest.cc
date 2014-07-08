@@ -89,7 +89,7 @@ TEST_F(VideoProcessingModuleTest, HandleNullBuffer) {
 
 TEST_F(VideoProcessingModuleTest, HandleBadStats) {
   VideoProcessingModule::FrameStats stats;
-  scoped_array<uint8_t> video_buffer(new uint8_t[frame_length_]);
+  scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                  source_file_));
   EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
@@ -118,7 +118,6 @@ TEST_F(VideoProcessingModuleTest, HandleBadSize) {
   EXPECT_EQ(-3, vpm_->BrightnessDetection(video_frame_, stats));
 
   EXPECT_EQ(VPM_PARAMETER_ERROR, vpm_->SetTargetResolution(0,0,0));
-  EXPECT_EQ(VPM_PARAMETER_ERROR, vpm_->SetMaxFramerate(0));
 
   I420VideoFrame *out_frame = NULL;
   EXPECT_EQ(VPM_PARAMETER_ERROR, vpm_->PreprocessFrame(video_frame_,
@@ -129,7 +128,7 @@ TEST_F(VideoProcessingModuleTest, IdenticalResultsAfterReset) {
   I420VideoFrame video_frame2;
   VideoProcessingModule::FrameStats stats;
   // Only testing non-static functions here.
-  scoped_array<uint8_t> video_buffer(new uint8_t[frame_length_]);
+  scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                 source_file_));
   EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
@@ -172,7 +171,7 @@ TEST_F(VideoProcessingModuleTest, IdenticalResultsAfterReset) {
 
 TEST_F(VideoProcessingModuleTest, FrameStats) {
   VideoProcessingModule::FrameStats stats;
-  scoped_array<uint8_t> video_buffer(new uint8_t[frame_length_]);
+  scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                  source_file_));
   EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
@@ -200,7 +199,6 @@ TEST_F(VideoProcessingModuleTest, PreprocessorLogic) {
   // Disable temporal sampling (frame dropping).
   vpm_->EnableTemporalDecimation(false);
   int resolution = 100;
-  EXPECT_EQ(VPM_OK, vpm_->SetMaxFramerate(30));
   EXPECT_EQ(VPM_OK, vpm_->SetTargetResolution(resolution, resolution, 15));
   EXPECT_EQ(VPM_OK, vpm_->SetTargetResolution(resolution, resolution, 30));
   // Disable spatial sampling.
@@ -242,7 +240,7 @@ TEST_F(VideoProcessingModuleTest, Resampler) {
   vpm_->EnableTemporalDecimation(false);
 
   // Reading test frame
-  scoped_array<uint8_t> video_buffer(new uint8_t[frame_length_]);
+  scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                  source_file_));
   // Using ConvertToI420 to add stride to the image.

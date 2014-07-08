@@ -49,8 +49,8 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
                      int base_channel);
   virtual ~VideoReceiveStream();
 
-  virtual void StartReceiving() OVERRIDE;
-  virtual void StopReceiving() OVERRIDE;
+  virtual void Start() OVERRIDE;
+  virtual void Stop() OVERRIDE;
   virtual Stats GetStats() const OVERRIDE;
 
   virtual void GetCurrentReceiveCodec(VideoCodec* receive_codec) OVERRIDE;
@@ -69,8 +69,8 @@ class VideoReceiveStream : public webrtc::VideoReceiveStream,
  private:
   TransportAdapter transport_adapter_;
   EncodedFrameCallbackAdapter encoded_frame_proxy_;
-  VideoReceiveStream::Config config_;
-  Clock* clock_;
+  const VideoReceiveStream::Config config_;
+  Clock* const clock_;
 
   ViEBase* video_engine_base_;
   ViECodec* codec_;

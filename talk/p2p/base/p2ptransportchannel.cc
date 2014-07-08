@@ -259,7 +259,8 @@ void P2PTransportChannel::SetIceCredentials(const std::string& ice_ufrag,
   if (!ice_ufrag_.empty() && !ice_pwd_.empty()) {
     // Restart candidate allocation if there is any change in either
     // ice ufrag or password.
-    ice_restart = (ice_ufrag_ != ice_ufrag) || (ice_pwd_!= ice_pwd);
+    ice_restart =
+        IceCredentialsChanged(ice_ufrag_, ice_pwd_, ice_ufrag, ice_pwd);
   }
 
   ice_ufrag_ = ice_ufrag;
@@ -470,7 +471,6 @@ void P2PTransportChannel::OnUnknownAddress(
     }
   } else {
     // Create a new candidate with this address.
-
     std::string type;
     if (port->IceProtocol() == ICEPROTO_RFC5245) {
       type = PRFLX_PORT_TYPE;

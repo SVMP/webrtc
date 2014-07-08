@@ -94,12 +94,45 @@ static std::string IceProtoToString(TransportProtocol proto) {
   return proto_str;
 }
 
+static bool VerifyIceParams(const TransportDescription& desc) {
+  // For legacy protocols.
+  if (desc.ice_ufrag.empty() && desc.ice_pwd.empty())
+    return true;
+
+  if (desc.ice_ufrag.length() < ICE_UFRAG_MIN_LENGTH ||
+      desc.ice_ufrag.length() > ICE_UFRAG_MAX_LENGTH) {
+    return false;
+  }
+  if (desc.ice_pwd.length() < ICE_PWD_MIN_LENGTH ||
+      desc.ice_pwd.length() > ICE_PWD_MAX_LENGTH) {
+    return false;
+  }
+  return true;
+}
+
 bool BadTransportDescription(const std::string& desc, std::string* err_desc) {
   if (err_desc) {
     *err_desc = desc;
   }
   LOG(LS_ERROR) << desc;
   return false;
+}
+
+bool IceCredentialsChanged(const std::string& old_ufrag,
+                           const std::string& old_pwd,
+                           const std::string& new_ufrag,
+                           const std::string& new_pwd) {
+  // TODO(jiayl): The standard (RFC 5245 Section 9.1.1.1) says that ICE should
+  // restart when both the ufrag and password are changed, but we do restart
+  // when either ufrag or passwrod is changed to keep compatible with GICE. We
+  // should clean this up when GICE is no longer used.
+  return (old_ufrag != new_ufrag) || (old_pwd != new_pwd);
+}
+
+static bool IceCredentialsChanged(const TransportDescription& old_desc,
+                                  const TransportDescription& new_desc) {
+  return IceCredentialsChanged(old_desc.ice_ufrag, old_desc.ice_pwd,
+                               new_desc.ice_ufrag, new_desc.ice_pwd);
 }
 
 Transport::Transport(talk_base::Thread* signaling_thread,
@@ -704,6 +737,21 @@ bool Transport::SetLocalTransportDescription_w(
     std::string* error_desc) {
   bool ret = true;
   talk_base::CritScope cs(&crit_);
+
+  if (!VerifyIceParams(desc)) {
+    return BadTransportDescription("Invalid ice-ufrag or ice-pwd length",
+                                   error_desc);
+  }
+
+  if (local_description_ && IceCredentialsChanged(*local_description_, desc)) {
+    IceRole new_ice_role = (action == CA_OFFER) ? ICEROLE_CONTROLLING
+                                                : ICEROLE_CONTROLLED;
+
+    // It must be called before ApplyLocalTransportDescription_w, which may
+    // trigger an ICE restart and depends on the new ICE role.
+    SetIceRole_w(new_ice_role);
+  }
+
   local_description_.reset(new TransportDescription(desc));
 
   for (ChannelMap::iterator iter = channels_.begin();
@@ -726,8 +774,13 @@ bool Transport::SetRemoteTransportDescription_w(
     std::string* error_desc) {
   bool ret = true;
   talk_base::CritScope cs(&crit_);
-  remote_description_.reset(new TransportDescription(desc));
 
+  if (!VerifyIceParams(desc)) {
+    return BadTransportDescription("Invalid ice-ufrag or ice-pwd length",
+                                   error_desc);
+  }
+
+  remote_description_.reset(new TransportDescription(desc));
   for (ChannelMap::iterator iter = channels_.begin();
        iter != channels_.end(); ++iter) {
     ret &= ApplyRemoteTransportDescription_w(iter->second.get(), error_desc);

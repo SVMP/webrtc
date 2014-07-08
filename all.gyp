@@ -9,21 +9,27 @@
 {
   'variables': {
     'libjingle_root%': '<(DEPTH)',
+    'include_tests%': 1,
   },
   'targets': [
     {
       'target_name': 'All',
       'type': 'none',
       'dependencies': [
+        'third_party/openmax_dl/dl/dl.gyp:*',
         'webrtc/webrtc.gyp:*',
         '<(libjingle_root)/talk/libjingle.gyp:*',
         '<(libjingle_root)/talk/libjingle_examples.gyp:*',
-        '<(libjingle_root)/talk/libjingle_tests.gyp:*',
       ],
       'conditions': [
         ['OS=="android"', {
           'dependencies': [
             'webrtc/webrtc_examples.gyp:*',
+          ],
+        }],
+        ['include_tests==1', {
+          'dependencies': [
+            '<(libjingle_root)/talk/libjingle_tests.gyp:*',
           ],
         }],
       ],

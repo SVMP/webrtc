@@ -254,6 +254,17 @@ class DtlsTestClient : public sigslot::has_slots<> {
     } while (sent < count);
   }
 
+  int SendInvalidSrtpPacket(size_t channel, size_t size) {
+    ASSERT(channel < channels_.size());
+    talk_base::scoped_ptr<char[]> packet(new char[size]);
+    // Fill the packet with 0 to form an invalid SRTP packet.
+    memset(packet.get(), 0, size);
+
+    talk_base::PacketOptions packet_options;
+    return channels_[channel]->SendPacket(
+        packet.get(), size, packet_options, cricket::PF_SRTP_BYPASS);
+  }
+
   void ExpectPackets(size_t channel, size_t size) {
     packet_size_ = size;
     received_.clear();
@@ -624,6 +635,16 @@ TEST_F(DtlsTransportChannelTest, TestTransferDtlsSrtp) {
   TestTransfer(0, 1000, 100, true);
 }
 
+// Connect with DTLS-SRTP, transfer an invalid SRTP packet, and expects -1
+// returned.
+TEST_F(DtlsTransportChannelTest, TestTransferDtlsInvalidSrtpPacket) {
+  MAYBE_SKIP_TEST(HaveDtls);
+  PrepareDtls(true, true);
+  PrepareDtlsSrtp(true, true);
+  ASSERT_TRUE(Connect());
+  int result = client1_.SendInvalidSrtpPacket(0, 100);
+  ASSERT_EQ(-1, result);
+}
 
 // Connect with DTLS. A does DTLS-SRTP but B does not.
 TEST_F(DtlsTransportChannelTest, TestTransferDtlsSrtpRejected) {
@@ -751,6 +772,25 @@ TEST_F(DtlsTransportChannelTest, TestDtlsReOfferWithDifferentSetupAttr) {
   // Renegotiate from client2 with actpass and client1 as active.
   Renegotiate(&client2_, cricket::CONNECTIONROLE_ACTIVE,
               cricket::CONNECTIONROLE_ACTPASS, NF_REOFFER);
+  TestTransfer(0, 1000, 100, true);
+  TestTransfer(1, 1000, 100, true);
+}
+
+// Test that re-negotiation can be started before the clients become connected
+// in the first negotiation.
+TEST_F(DtlsTransportChannelTest, TestRenegotiateBeforeConnect) {
+  MAYBE_SKIP_TEST(HaveDtlsSrtp);
+  SetChannelCount(2);
+  PrepareDtls(true, true);
+  PrepareDtlsSrtp(true, true);
+  Negotiate();
+
+  Renegotiate(&client1_, cricket::CONNECTIONROLE_ACTPASS,
+              cricket::CONNECTIONROLE_ACTIVE, NF_REOFFER);
+  bool rv = client1_.Connect(&client2_);
+  EXPECT_TRUE(rv);
+  EXPECT_TRUE_WAIT(client1_.writable() && client2_.writable(), 10000);
+
   TestTransfer(0, 1000, 100, true);
   TestTransfer(1, 1000, 100, true);
 }

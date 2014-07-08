@@ -10,6 +10,8 @@
 
 #include "webrtc/modules/desktop_capture/mouse_cursor_monitor.h"
 
+#include <assert.h>
+
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/mouse_cursor.h"
 #include "webrtc/modules/desktop_capture/win/cursor.h"
@@ -28,6 +30,9 @@ class MouseCursorMonitorWin : public MouseCursorMonitor {
   virtual void Capture() OVERRIDE;
 
  private:
+  // Get the rect of the currently selected screen, relative to the primary
+  // display's top-left. If the screen is disabled or disconnected, or any error
+  // happens, an empty rect is returned.
   DesktopRect GetScreenRect();
 
   HWND window_;
@@ -148,11 +153,10 @@ DesktopRect MouseCursorMonitorWin::GetScreenRect() {
   if (!result)
     return DesktopRect();
 
-  return DesktopRect::MakeXYWH(
-      GetSystemMetrics(SM_XVIRTUALSCREEN) + device_mode.dmPosition.x,
-      GetSystemMetrics(SM_YVIRTUALSCREEN) + device_mode.dmPosition.y,
-      device_mode.dmPelsWidth,
-      device_mode.dmPelsHeight);
+  return DesktopRect::MakeXYWH(device_mode.dmPosition.x,
+                               device_mode.dmPosition.y,
+                               device_mode.dmPelsWidth,
+                               device_mode.dmPelsHeight);
 }
 
 MouseCursorMonitor* MouseCursorMonitor::CreateForWindow(

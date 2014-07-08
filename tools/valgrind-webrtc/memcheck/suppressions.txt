@@ -10,6 +10,116 @@
 
 # 1. webrtc stuff
 {
+   bug_3446
+   Memcheck:Uninitialized
+   fun:vp8cx_pick_filter_level_fast
+   fun:vp8_loopfilter_frame
+   fun:encode_frame_to_data_rate
+   fun:vp8_get_compressed_data
+   fun:vp8e_encode
+   fun:vpx_codec_encode
+   ...
+   fun:_ZN6webrtc4test18VideoProcessorImpl12ProcessFrameEi
+   fun:_ZN6webrtc29VideoProcessorIntegrationTest22ProcessFramesAndVerifyENS_14QualityMetricsENS_11RateProfileENS_15CodecConfigParsEPNS_18RateControlMetricsE
+   fun:_ZN6webrtc70VideoProcessorIntegrationTest_ProcessNoLossSpatialResizeFrameDrop_Test8TestBodyEv
+}
+{
+   bug_1976_1
+   Memcheck:Unaddressable
+   fun:pthread_mutex_unlock
+   fun:_ZN9rtc15CriticalSection5LeaveEv
+   fun:_ZN9rtc9CritScopeD1Ev
+   ...
+   fun:_ZN9rtc6Thread15ProcessMessagesEi
+   fun:_ZN9rtc6Thread3RunEv
+   fun:_ZN9rtc6Thread6PreRunEPv
+}
+{
+   bug_1976_2
+   Memcheck:Leak
+   fun:calloc
+   obj:/usr/lib/x86_64-linux-gnu/libnss3.so
+   ...
+   fun:NSS_NoDB_Init
+   fun:_ZN9rtc10NSSContext13InitializeSSLEPFbPvE
+   fun:_ZN9rtc13InitializeSSLEPFbPvE
+   fun:_ZN9rtc10RandomTest13SetUpTestCaseEv
+   fun:_ZN7testing8TestCase16RunSetUpTestCaseEv
+}
+{
+   bug_2100_3
+   Memcheck:Uninitialized
+   fun:tls1_enc
+   fun:ssl3_get_record
+   fun:ssl3_read_bytes
+   fun:ssl3_read_internal
+   fun:ssl3_read
+   fun:SSL_read
+   fun:_ZN9rtc20OpenSSLStreamAdapter4ReadEPvmPmPi
+   ...
+}
+{
+   bug_2100_4
+   Memcheck:Uninitialized
+   fun:_ZN7testing8internal11CmpHelperEQIjhEENS_15AssertionResultEPKcS4_RKT_RKT0_
+   fun:_ZN7testing8internal8EqHelperILb0EE7CompareIjhEENS_15AssertionResultEPKcS6_RKT_RKT0_
+   fun:_ZN24SSLStreamAdapterTestDTLS8ReadDataEPN9rtc15StreamInterfaceE
+   ...
+}
+{
+   bug_2100_5
+   Memcheck:Uninitialized
+   fun:dtls1_process_record
+   fun:dtls1_get_record
+   fun:dtls1_read_bytes
+   fun:ssl3_read_internal
+   fun:ssl3_read
+   fun:SSL_read
+   fun:_ZN9rtc20OpenSSLStreamAdapter4ReadEPvmPmPi
+   ...
+}
+{
+   BIO_new_mem_buf_1
+   Memcheck:Leak
+   fun:malloc
+   fun:default_malloc_ex
+   fun:CRYPTO_malloc
+   fun:BUF_MEM_new
+   fun:mem_new
+   fun:BIO_set
+   fun:BIO_new
+   fun:BIO_new_mem_buf
+   fun:_ZN9rtc18OpenSSLCertificate13FromPEMStringERKSs
+   ...
+}
+{
+   BIO_new_mem_buf_2
+   Memcheck:Leak
+   fun:malloc
+   fun:default_malloc_ex
+   fun:CRYPTO_malloc
+   fun:BUF_MEM_new
+   fun:mem_new
+   fun:BIO_set
+   fun:BIO_new
+   fun:BIO_new_mem_buf
+   fun:_ZN9rtc15OpenSSLIdentity14FromPEMStringsERKSsS2_
+}
+{
+   SignalsCloseAfterForcedCloseAll
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN9rtc10HttpServer10Connection12BeginProcessEPNS_15StreamInterfaceE
+   ...
+}
+{
+   DoNotDeleteTask2
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZN9rtc41unstarted_task_test_DoNotDeleteTask2_Test8TestBodyEv
+}
+{
    bug_716
    Memcheck:Leak
    fun:_Znw*
@@ -370,7 +480,7 @@
 #-----------------------------------------------------------------------
 # 2. libjingle stuff (talk folder)
 {
-   bug_1976_1
+   bug_1976_1_tmp
    Memcheck:Unaddressable
    fun:pthread_mutex_unlock
    fun:_ZN9talk_base15CriticalSection5LeaveEv
@@ -381,7 +491,7 @@
    fun:_ZN9talk_base6Thread6PreRunEPv
 }
 {
-   bug_1976_2
+   bug_1976_2_tmp
    Memcheck:Leak
    fun:calloc
    obj:/usr/lib/x86_64-linux-gnu/libnss3.so
@@ -421,7 +531,7 @@
    ...
 }
 {
-   bug_2100_3
+   bug_2100_3_tmp
    Memcheck:Uninitialized
    fun:tls1_enc
    fun:ssl3_get_record
@@ -433,7 +543,7 @@
    ...
 }
 {
-   bug_2100_4
+   bug_2100_4_tmp
    Memcheck:Uninitialized
    fun:_ZN7testing8internal11CmpHelperEQIjhEENS_15AssertionResultEPKcS4_RKT_RKT0_
    fun:_ZN7testing8internal8EqHelperILb0EE7CompareIjhEENS_15AssertionResultEPKcS6_RKT_RKT0_
@@ -441,7 +551,7 @@
    ...
 }
 {
-   bug_2100_5
+   bug_2100_5_tmp
    Memcheck:Uninitialized
    fun:dtls1_process_record
    fun:dtls1_get_record
@@ -455,7 +565,7 @@
 # For BIO_new_mem_buf
 # http://www.openssl.org/support/faq.html#PROG13
 {
-   BIO_new_mem_buf_1
+   BIO_new_mem_buf_1_tmp
    Memcheck:Leak
    fun:malloc
    fun:default_malloc_ex
@@ -469,7 +579,7 @@
    ...
 }
 {
-   BIO_new_mem_buf_2
+   BIO_new_mem_buf_2_tmp
    Memcheck:Leak
    fun:malloc
    fun:default_malloc_ex
@@ -483,7 +593,7 @@
 }
 # For HttpServer.SignalsCloseAfterForcedCloseAll
 {
-   SignalsCloseAfterForcedCloseAll
+   SignalsCloseAfterForcedCloseAll_tmp
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN9talk_base10HttpServer10Connection12BeginProcessEPNS_15StreamInterfaceE
@@ -540,7 +650,7 @@
 }
 # For tests that leaks by design.
 {
-   DoNotDeleteTask2
+   DoNotDeleteTask2_tmp
    Memcheck:Leak
    fun:_Znw*
    ...
@@ -587,4 +697,18 @@
    fun:_ZN21VideoMediaChannelTestIN7cricket17WebRtcVideoEngineENS0_23WebRtcVideoMediaChannelEE4SendERKNS0_10VideoCodecE
    fun:_ZN21VideoMediaChannelTestIN7cricket17WebRtcVideoEngineENS0_23WebRtcVideoMediaChannelEE36TwoStreamsSendAndFailUnsignalledRecvERKNS0_10VideoCodecE
    fun:_ZN69WebRtcVideoMediaChannelTest_TwoStreamsSendAndFailUnsignalledRecv_Test8TestBodyEv
+}
+{
+  bug_3478
+  Memcheck:Leak
+  fun:_Znw*
+  fun:_ZNK9talk_base18FakeSSLCertificate12GetReferenceEv
+  fun:_ZN9talk_base18FakeSSLCertificate7DupCertES0_
+  fun:_ZSt9transformIN9__gnu_cxx17__normal_iteratorIPKN9talk_base18FakeSSLCertificateESt6vectorIS3_SaIS3_EEEENS1_IPPNS2_14SSLCertificateES6_ISB_SaISB_EEEEPFPS3_S3_EET0_T_SK_SJ_T1_
+  fun:_ZNK9talk_base18FakeSSLCertificate8GetChainEPPNS_12SSLCertChainE
+  fun:_ZN6webrtc14StatsCollector21AddCertificateReportsEPKN9talk_base14SSLCertificateE
+  fun:_ZN6webrtc14StatsCollector18ExtractSessionInfoEv
+  fun:_ZN6webrtc14StatsCollector11UpdateStatsENS_23PeerConnectionInterface16StatsOutputLevelE
+  fun:_ZN12_GLOBAL__N_118StatsCollectorTest22TestCertificateReportsERKN9talk_base18FakeSSLCertificateERKSt6vectorISsSaISsEES4_S9_
+  fun:_ZN12_GLOBAL__N_156StatsCollectorTest_ChainedCertificateReportsCreated_Test8TestBodyEv
 }

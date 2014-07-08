@@ -25,6 +25,7 @@ namespace webrtc {
 
 class CriticalSectionWrapper;
 class FecReceiver;
+class RemoteNtpTimeEstimator;
 class ReceiveStatistics;
 class RemoteBitrateEstimator;
 class RtpDump;
@@ -46,8 +47,8 @@ class ViEReceiver : public RtpData {
   bool RegisterPayload(const VideoCodec& video_codec);
 
   void SetNackStatus(bool enable, int max_nack_reordering_threshold);
-  void SetRtxStatus(bool enable, uint32_t ssrc);
-  void SetRtxPayloadType(uint32_t payload_type);
+  void SetRtxPayloadType(int payload_type);
+  void SetRtxSsrc(uint32_t ssrc);
 
   uint32_t GetRemoteSsrc() const;
   int GetCsrcs(uint32_t* csrcs) const;
@@ -80,8 +81,6 @@ class ViEReceiver : public RtpData {
       const uint16_t payload_size,
       const WebRtcRTPHeader* rtp_header);
 
-  void EstimatedReceiveBandwidth(unsigned int* available_bandwidth) const;
-
   void GetReceiveBandwidthEstimatorStats(
       ReceiveBandwidthEstimatorStats* output) const;
 
@@ -106,7 +105,6 @@ class ViEReceiver : public RtpData {
   bool IsPacketRetransmitted(const RTPHeader& header, bool in_order) const;
 
   scoped_ptr<CriticalSectionWrapper> receive_cs_;
-  const int32_t channel_id_;
   scoped_ptr<RtpHeaderParser> rtp_header_parser_;
   scoped_ptr<RTPPayloadRegistry> rtp_payload_registry_;
   scoped_ptr<RtpReceiver> rtp_receiver_;
@@ -116,6 +114,8 @@ class ViEReceiver : public RtpData {
   std::list<RtpRtcp*> rtp_rtcp_simulcast_;
   VideoCodingModule* vcm_;
   RemoteBitrateEstimator* remote_bitrate_estimator_;
+
+  scoped_ptr<RemoteNtpTimeEstimator> ntp_estimator_;
 
   RtpDump* rtp_dump_;
   bool receiving_;

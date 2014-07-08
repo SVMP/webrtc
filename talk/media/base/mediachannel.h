@@ -171,7 +171,6 @@ struct AudioOptions {
     experimental_aec.SetFrom(change.experimental_aec);
     experimental_ns.SetFrom(change.experimental_ns);
     aec_dump.SetFrom(change.aec_dump);
-    experimental_acm.SetFrom(change.experimental_acm);
     tx_agc_target_dbov.SetFrom(change.tx_agc_target_dbov);
     tx_agc_digital_compression_gain.SetFrom(
         change.tx_agc_digital_compression_gain);
@@ -183,6 +182,7 @@ struct AudioOptions {
     recording_sample_rate.SetFrom(change.recording_sample_rate);
     playout_sample_rate.SetFrom(change.playout_sample_rate);
     dscp.SetFrom(change.dscp);
+    opus_fec.SetFrom(change.opus_fec);
   }
 
   bool operator==(const AudioOptions& o) const {
@@ -200,7 +200,6 @@ struct AudioOptions {
         experimental_ns == o.experimental_ns &&
         adjust_agc_delta == o.adjust_agc_delta &&
         aec_dump == o.aec_dump &&
-        experimental_acm == o.experimental_acm &&
         tx_agc_target_dbov == o.tx_agc_target_dbov &&
         tx_agc_digital_compression_gain == o.tx_agc_digital_compression_gain &&
         tx_agc_limiter == o.tx_agc_limiter &&
@@ -209,7 +208,8 @@ struct AudioOptions {
         rx_agc_limiter == o.rx_agc_limiter &&
         recording_sample_rate == o.recording_sample_rate &&
         playout_sample_rate == o.playout_sample_rate &&
-        dscp == o.dscp;
+        dscp == o.dscp &&
+        opus_fec == o.opus_fec;
   }
 
   std::string ToString() const {
@@ -229,7 +229,6 @@ struct AudioOptions {
     ost << ToStringIfSet("experimental_aec", experimental_aec);
     ost << ToStringIfSet("experimental_ns", experimental_ns);
     ost << ToStringIfSet("aec_dump", aec_dump);
-    ost << ToStringIfSet("experimental_acm", experimental_acm);
     ost << ToStringIfSet("tx_agc_target_dbov", tx_agc_target_dbov);
     ost << ToStringIfSet("tx_agc_digital_compression_gain",
         tx_agc_digital_compression_gain);
@@ -241,6 +240,7 @@ struct AudioOptions {
     ost << ToStringIfSet("recording_sample_rate", recording_sample_rate);
     ost << ToStringIfSet("playout_sample_rate", playout_sample_rate);
     ost << ToStringIfSet("dscp", dscp);
+    ost << ToStringIfSet("opus_fec", opus_fec);
     ost << "}";
     return ost.str();
   }
@@ -267,7 +267,6 @@ struct AudioOptions {
   Settable<bool> experimental_aec;
   Settable<bool> experimental_ns;
   Settable<bool> aec_dump;
-  Settable<bool> experimental_acm;
   // Note that tx_agc_* only applies to non-experimental AGC.
   Settable<uint16> tx_agc_target_dbov;
   Settable<uint16> tx_agc_digital_compression_gain;
@@ -279,6 +278,8 @@ struct AudioOptions {
   Settable<uint32> playout_sample_rate;
   // Set DSCP value for packet sent from audio channel.
   Settable<bool> dscp;
+  // Set Opus FEC
+  Settable<bool> opus_fec;
 };
 
 // Options that can be applied to a VideoMediaChannel or a VideoMediaEngine.
@@ -318,6 +319,10 @@ struct VideoOptions {
     cpu_overuse_detection.SetFrom(change.cpu_overuse_detection);
     cpu_underuse_threshold.SetFrom(change.cpu_underuse_threshold);
     cpu_overuse_threshold.SetFrom(change.cpu_overuse_threshold);
+    cpu_underuse_encode_rsd_threshold.SetFrom(
+        change.cpu_underuse_encode_rsd_threshold);
+    cpu_overuse_encode_rsd_threshold.SetFrom(
+        change.cpu_overuse_encode_rsd_threshold);
     cpu_overuse_encode_usage.SetFrom(change.cpu_overuse_encode_usage);
     conference_mode.SetFrom(change.conference_mode);
     process_adaptation_threshhold.SetFrom(change.process_adaptation_threshhold);
@@ -335,6 +340,7 @@ struct VideoOptions {
     screencast_min_bitrate.SetFrom(change.screencast_min_bitrate);
     use_improved_wifi_bandwidth_estimator.SetFrom(
         change.use_improved_wifi_bandwidth_estimator);
+    use_payload_padding.SetFrom(change.use_payload_padding);
   }
 
   bool operator==(const VideoOptions& o) const {
@@ -354,6 +360,10 @@ struct VideoOptions {
         cpu_overuse_detection == o.cpu_overuse_detection &&
         cpu_underuse_threshold == o.cpu_underuse_threshold &&
         cpu_overuse_threshold == o.cpu_overuse_threshold &&
+        cpu_underuse_encode_rsd_threshold ==
+            o.cpu_underuse_encode_rsd_threshold &&
+        cpu_overuse_encode_rsd_threshold ==
+            o.cpu_overuse_encode_rsd_threshold &&
         cpu_overuse_encode_usage == o.cpu_overuse_encode_usage &&
         conference_mode == o.conference_mode &&
         process_adaptation_threshhold == o.process_adaptation_threshhold &&
@@ -370,7 +380,8 @@ struct VideoOptions {
         skip_encoding_unused_streams == o.skip_encoding_unused_streams &&
         screencast_min_bitrate == o.screencast_min_bitrate &&
         use_improved_wifi_bandwidth_estimator ==
-            o.use_improved_wifi_bandwidth_estimator;
+            o.use_improved_wifi_bandwidth_estimator &&
+        use_payload_padding == o.use_payload_padding;
   }
 
   std::string ToString() const {
@@ -394,6 +405,10 @@ struct VideoOptions {
     ost << ToStringIfSet("cpu overuse detection", cpu_overuse_detection);
     ost << ToStringIfSet("cpu underuse threshold", cpu_underuse_threshold);
     ost << ToStringIfSet("cpu overuse threshold", cpu_overuse_threshold);
+    ost << ToStringIfSet("cpu underuse encode rsd threshold",
+                         cpu_underuse_encode_rsd_threshold);
+    ost << ToStringIfSet("cpu overuse encode rsd threshold",
+                         cpu_overuse_encode_rsd_threshold);
     ost << ToStringIfSet("cpu overuse encode usage",
                          cpu_overuse_encode_usage);
     ost << ToStringIfSet("conference mode", conference_mode);
@@ -413,6 +428,7 @@ struct VideoOptions {
     ost << ToStringIfSet("screencast min bitrate", screencast_min_bitrate);
     ost << ToStringIfSet("improved wifi bwe",
                          use_improved_wifi_bandwidth_estimator);
+    ost << ToStringIfSet("payload padding", use_payload_padding);
     ost << "}";
     return ost.str();
   }
@@ -447,10 +463,22 @@ struct VideoOptions {
   // adaptation algorithm. So this option will override the
   // |adapt_input_to_cpu_usage|.
   Settable<bool> cpu_overuse_detection;
-  // Low threshold for cpu overuse adaptation in ms.  (Adapt up)
+  // Low threshold (t1) for cpu overuse adaptation.  (Adapt up)
+  // Metric: encode usage (m1). m1 < t1 => underuse.
   Settable<int> cpu_underuse_threshold;
-  // High threshold for cpu overuse adaptation in ms.  (Adapt down)
+  // High threshold (t1) for cpu overuse adaptation.  (Adapt down)
+  // Metric: encode usage (m1). m1 > t1 => overuse.
   Settable<int> cpu_overuse_threshold;
+  // Low threshold (t2) for cpu overuse adaptation. (Adapt up)
+  // Metric: relative standard deviation of encode time (m2).
+  // Optional threshold. If set, (m1 < t1 && m2 < t2) => underuse.
+  // Note: t2 will have no effect if t1 is not set.
+  Settable<int> cpu_underuse_encode_rsd_threshold;
+  // High threshold (t2) for cpu overuse adaptation. (Adapt down)
+  // Metric: relative standard deviation of encode time (m2).
+  // Optional threshold. If set, (m1 > t1 || m2 > t2) => overuse.
+  // Note: t2 will have no effect if t1 is not set.
+  Settable<int> cpu_overuse_encode_rsd_threshold;
   // Use encode usage for cpu detection.
   Settable<bool> cpu_overuse_encode_usage;
   // Use conference mode?
@@ -481,6 +509,8 @@ struct VideoOptions {
   Settable<int> screencast_min_bitrate;
   // Enable improved bandwidth estiamtor on wifi.
   Settable<bool> use_improved_wifi_bandwidth_estimator;
+  // Enable payload padding.
+  Settable<bool> use_payload_padding;
 };
 
 // A class for playing out soundclips.
@@ -791,6 +821,7 @@ struct MediaReceiverInfo {
   int packets_rcvd;
   int packets_lost;
   float fraction_lost;
+  std::string codec_name;
   std::vector<SsrcReceiverInfo> local_stats;
   std::vector<SsrcSenderInfo> remote_stats;
 };
@@ -833,7 +864,8 @@ struct VoiceReceiverInfo : public MediaReceiverInfo {
         decoding_normal(0),
         decoding_plc(0),
         decoding_cng(0),
-        decoding_plc_cng(0) {
+        decoding_plc_cng(0),
+        capture_start_ntp_time_ms(-1) {
   }
 
   int ext_seqnum;
@@ -850,6 +882,8 @@ struct VoiceReceiverInfo : public MediaReceiverInfo {
   int decoding_plc;
   int decoding_cng;
   int decoding_plc_cng;
+  // Estimated capture start time in NTP time in ms.
+  int64 capture_start_ntp_time_ms;
 };
 
 struct VideoSenderInfo : public MediaSenderInfo {
@@ -867,9 +901,11 @@ struct VideoSenderInfo : public MediaSenderInfo {
         nominal_bitrate(0),
         preferred_bitrate(0),
         adapt_reason(0),
+        adapt_changes(0),
         capture_jitter_ms(0),
         avg_encode_ms(0),
         encode_usage_percent(0),
+        encode_rsd(0),
         capture_queue_delay_ms_per_s(0) {
   }
 
@@ -887,9 +923,11 @@ struct VideoSenderInfo : public MediaSenderInfo {
   int nominal_bitrate;
   int preferred_bitrate;
   int adapt_reason;
+  int adapt_changes;
   int capture_jitter_ms;
   int avg_encode_ms;
   int encode_usage_percent;
+  int encode_rsd;
   int capture_queue_delay_ms_per_s;
   VariableInfo<int> adapt_frame_drops;
   VariableInfo<int> effects_frame_drops;
@@ -915,7 +953,8 @@ struct VideoReceiverInfo : public MediaReceiverInfo {
         min_playout_delay_ms(0),
         render_delay_ms(0),
         target_delay_ms(0),
-        current_delay_ms(0) {
+        current_delay_ms(0),
+        capture_start_ntp_time_ms(-1) {
   }
 
   std::vector<SsrcGroup> ssrc_groups;
@@ -952,6 +991,9 @@ struct VideoReceiverInfo : public MediaReceiverInfo {
   int target_delay_ms;
   // Current overall delay, possibly ramping towards target_delay_ms.
   int current_delay_ms;
+
+  // Estimated capture start time in NTP time in ms.
+  int64 capture_start_ntp_time_ms;
 };
 
 struct DataSenderInfo : public MediaSenderInfo {
@@ -1277,6 +1319,8 @@ class DataMediaChannel : public MediaChannel {
   // Signal when the media channel is ready to send the stream. Arguments are:
   //     writable(bool)
   sigslot::signal1<bool> SignalReadyToSend;
+  // Signal for notifying that the remote side has closed the DataChannel.
+  sigslot::signal1<uint32> SignalStreamClosedRemotely;
 };
 
 }  // namespace cricket

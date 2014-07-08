@@ -39,6 +39,8 @@ namespace cricket {
 
 typedef std::map<std::string, std::string> CodecParameterMap;
 
+extern const int kMaxPayloadId;
+
 class FeedbackParam {
  public:
   FeedbackParam(const std::string& id, const std::string& param)
@@ -104,6 +106,10 @@ struct Codec {
   void SetParam(const std::string& name, const std::string& value);
   void SetParam(const std::string& name, int value);
 
+  // It is safe to input a non-existent parameter.
+  // Returns true if the parameter existed, false if it did not exist.
+  bool RemoveParam(const std::string& name);
+
   bool HasFeedbackParam(const FeedbackParam& param) const;
   void AddFeedbackParam(const FeedbackParam& param);
 
@@ -120,6 +126,8 @@ struct Codec {
     name = c.name;
     clockrate = c.clockrate;
     preference = c.preference;
+    params = c.params;
+    feedback_params = c.feedback_params;
     return *this;
   }
 
@@ -127,7 +135,9 @@ struct Codec {
     return this->id == c.id &&  // id is reserved in objective-c
         name == c.name &&
         clockrate == c.clockrate &&
-        preference == c.preference;
+        preference == c.preference &&
+        params == c.params &&
+        feedback_params == c.feedback_params;
   }
 
   bool operator!=(const Codec& c) const {
@@ -242,6 +252,22 @@ struct VideoCodec : public Codec {
   bool operator!=(const VideoCodec& c) const {
     return !(*this == c);
   }
+
+  static VideoCodec CreateRtxCodec(int rtx_payload_type,
+                                   int associated_payload_type);
+
+  enum CodecType {
+    CODEC_VIDEO,
+    CODEC_RED,
+    CODEC_ULPFEC,
+    CODEC_RTX,
+  };
+
+  CodecType GetCodecType() const;
+  // Validates a VideoCodec's payload type, dimensions and bitrates etc. If they
+  // don't make sense (such as max < min bitrate), and error is logged and
+  // ValidateCodecFormat returns false.
+  bool ValidateCodecFormat() const;
 };
 
 struct DataCodec : public Codec {

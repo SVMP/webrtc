@@ -26,7 +26,7 @@ namespace acm2 {
 // Enum for CNG
 enum {
   kMaxPLCParamsCNG = WEBRTC_CNG_MAX_LPC_ORDER,
-  kNewCNGNumPLCParams = 8
+  kNewCNGNumLPCParams = 8
 };
 
 // Interval for sending new CNG parameters (SID frames) is 100 msec.
@@ -56,10 +56,10 @@ ACMGenericCodec::ACMGenericCodec()
       vad_mode_(VADNormal),
       dtx_enabled_(false),
       ptr_dtx_inst_(NULL),
-      num_lpc_params_(kNewCNGNumPLCParams),
+      num_lpc_params_(kNewCNGNumLPCParams),
       sent_cn_previous_(false),
       prev_frame_cng_(0),
-      neteq_decode_lock_(NULL),
+      has_internal_fec_(false),
       codec_wrapper_lock_(*RWLockWrapper::CreateRWLock()),
       last_timestamp_(0xD87F3F9F),
       unique_id_(0) {
@@ -209,7 +209,6 @@ int16_t ACMGenericCodec::Encode(uint8_t* bitstream,
     return 0;
   }
   WriteLockScoped lockCodec(codec_wrapper_lock_);
-  ReadLockScoped lockNetEq(*neteq_decode_lock_);
 
   // Not all codecs accept the whole frame to be pushed into encoder at once.
   // Some codecs needs to be feed with a specific number of samples different
@@ -393,7 +392,6 @@ int16_t ACMGenericCodec::EncoderParamsSafe(WebRtcACMCodecParams* enc_params) {
 
 int16_t ACMGenericCodec::ResetEncoder() {
   WriteLockScoped lockCodec(codec_wrapper_lock_);
-  ReadLockScoped lockNetEq(*neteq_decode_lock_);
   return ResetEncoderSafe();
 }
 
@@ -442,7 +440,6 @@ int16_t ACMGenericCodec::InternalResetEncoder() {
 int16_t ACMGenericCodec::InitEncoder(WebRtcACMCodecParams* codec_params,
                                      bool force_initialization) {
   WriteLockScoped lockCodec(codec_wrapper_lock_);
-  ReadLockScoped lockNetEq(*neteq_decode_lock_);
   return InitEncoderSafe(codec_params, force_initialization);
 }
 
@@ -546,7 +543,7 @@ void ACMGenericCodec::DestructEncoder() {
     WebRtcCng_FreeEnc(ptr_dtx_inst_);
     ptr_dtx_inst_ = NULL;
   }
-  num_lpc_params_ = kNewCNGNumPLCParams;
+  num_lpc_params_ = kNewCNGNumLPCParams;
 
   DestructEncoderSafe();
 }
@@ -628,7 +625,6 @@ int16_t ACMGenericCodec::CreateEncoder() {
 void ACMGenericCodec::DestructEncoderInst(void* ptr_inst) {
   if (ptr_inst != NULL) {
     WriteLockScoped lockCodec(codec_wrapper_lock_);
-    ReadLockScoped lockNetEq(*neteq_decode_lock_);
     InternalDestructEncoderInst(ptr_inst);
   }
 }

@@ -21,10 +21,8 @@
       'sources': [
         'include/bwe_defines.h',
         'include/remote_bitrate_estimator.h',
-        'include/rtp_to_ntp.h',
         'rate_statistics.cc',
         'rate_statistics.h',
-        'rtp_to_ntp.cc',
       ], # source
     },
     {
@@ -47,6 +45,7 @@
       ],
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
+        '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:field_trial_default',
         'bwe_tools_util',
         'rtp_rtcp',
       ],
@@ -69,6 +68,7 @@
       ],
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
+        '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:field_trial_default',
         'bwe_tools_util',
         'rtp_rtcp',
       ],

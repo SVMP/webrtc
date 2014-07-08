@@ -65,11 +65,13 @@ using cricket::kCodecParamMinBitrate;
 using cricket::kCodecParamMinPTime;
 using cricket::kCodecParamPTime;
 using cricket::kCodecParamSPropStereo;
+using cricket::kCodecParamStartBitrate;
 using cricket::kCodecParamStereo;
 using cricket::kCodecParamUseInbandFec;
 using cricket::kCodecParamSctpProtocol;
 using cricket::kCodecParamSctpStreams;
 using cricket::kCodecParamMaxAverageBitrate;
+using cricket::kCodecParamAssociatedPayloadType;
 using cricket::kWildcardPayloadType;
 using cricket::MediaContentDescription;
 using cricket::MediaType;
@@ -207,7 +209,6 @@ static const char kIsacCodecName[] = "ISAC";  // From webrtcvoiceengine.cc
 static const int kIsacWbDefaultRate = 32000;  // From acm_common_defs.h
 static const int kIsacSwbDefaultRate = 56000;  // From acm_common_defs.h
 
-static const int kDefaultSctpFmt = 5000;
 static const char kDefaultSctpmapProtocol[] = "webrtc-datachannel";
 
 struct SsrcInfo {
@@ -240,7 +241,7 @@ static void BuildMediaDescription(const ContentInfo* content_info,
                                   const TransportInfo* transport_info,
                                   const MediaType media_type,
                                   std::string* message);
-static void BuildSctpContentAttributes(std::string* message);
+static void BuildSctpContentAttributes(std::string* message, int sctp_port);
 static void BuildRtpContentAttributes(
     const MediaContentDescription* media_desc,
     const MediaType media_type,
@@ -912,6 +913,12 @@ std::string SdpSerializeCandidate(
   std::vector<cricket::Candidate> candidates;
   candidates.push_back(candidate.candidate());
   BuildCandidate(candidates, &message);
+  // From WebRTC draft section 4.8.1.1 candidate-attribute will be
+  // just candidate:<candidate> not a=candidate:<blah>CRLF
+  ASSERT(message.find("a=") == 0);
+  message.erase(0, 2);
+  ASSERT(message.find(kLineBreak) == message.size() - 2);
+  message.resize(message.size() - 2);
   return message;
 }
 
@@ -1166,6 +1173,7 @@ void BuildMediaDescription(const ContentInfo* content_info,
   ASSERT(media_desc != NULL);
 
   bool is_sctp = (media_desc->protocol() == cricket::kMediaProtocolDtlsSctp);
+  int sctp_port = cricket::kSctpDefaultPort;
 
   // RFC 4566
   // m=<media> <port> <proto> <fmt>
@@ -1200,14 +1208,22 @@ void BuildMediaDescription(const ContentInfo* content_info,
       fmt.append(talk_base::ToString<int>(it->id));
     }
   } else if (media_type == cricket::MEDIA_TYPE_DATA) {
+    const DataContentDescription* data_desc =
+          static_cast<const DataContentDescription*>(media_desc);
     if (is_sctp) {
       fmt.append(" ");
-      // TODO(jiayl): Replace the hard-coded string with the fmt read out of the
-      // ContentDescription.
-      fmt.append(talk_base::ToString<int>(kDefaultSctpFmt));
+
+      for (std::vector<cricket::DataCodec>::const_iterator it =
+           data_desc->codecs().begin();
+           it != data_desc->codecs().end(); ++it) {
+        if (it->id == cricket::kGoogleSctpDataCodecId &&
+            it->GetParam(cricket::kCodecParamPort, &sctp_port)) {
+          break;
+        }
+      }
+
+      fmt.append(talk_base::ToString<int>(sctp_port));
     } else {
-      const DataContentDescription* data_desc =
-          static_cast<const DataContentDescription*>(media_desc);
       for (std::vector<cricket::DataCodec>::const_iterator it =
            data_desc->codecs().begin();
            it != data_desc->codecs().end(); ++it) {
@@ -1289,18 +1305,18 @@ void BuildMediaDescription(const ContentInfo* content_info,
   AddLine(os.str(), message);
 
   if (is_sctp) {
-    BuildSctpContentAttributes(message);
+    BuildSctpContentAttributes(message, sctp_port);
   } else {
     BuildRtpContentAttributes(media_desc, media_type, message);
   }
 }
 
-void BuildSctpContentAttributes(std::string* message) {
+void BuildSctpContentAttributes(std::string* message, int sctp_port) {
   // draft-ietf-mmusic-sctp-sdp-04
   // a=sctpmap:sctpmap-number  protocol  [streams]
   std::ostringstream os;
   InitAttrLine(kAttributeSctpmap, &os);
-  os << kSdpDelimiterColon << kDefaultSctpFmt << kSdpDelimiterSpace
+  os << kSdpDelimiterColon << sctp_port << kSdpDelimiterSpace
      << kDefaultSctpmapProtocol << kSdpDelimiterSpace
      << (cricket::kMaxSctpSid + 1);
   AddLine(os.str(), message);
@@ -1500,10 +1516,10 @@ void WriteFmtpParameters(const cricket::CodecParameterMap& parameters,
 bool IsFmtpParam(const std::string& name) {
   const char* kFmtpParams[] = {
     kCodecParamMinPTime, kCodecParamSPropStereo,
-    kCodecParamStereo, kCodecParamUseInbandFec,
+    kCodecParamStereo, kCodecParamUseInbandFec, kCodecParamStartBitrate,
     kCodecParamMaxBitrate, kCodecParamMinBitrate, kCodecParamMaxQuantization,
     kCodecParamSctpProtocol, kCodecParamSctpStreams,
-    kCodecParamMaxAverageBitrate
+    kCodecParamMaxAverageBitrate, kCodecParamAssociatedPayloadType
   };
   for (size_t i = 0; i < ARRAY_SIZE(kFmtpParams); ++i) {
     if (_stricmp(name.c_str(), kFmtpParams[i]) == 0) {
@@ -2115,6 +2131,12 @@ bool ParseMediaDescription(const std::string& message,
     // <fmt>
     std::vector<int> codec_preference;
     for (size_t j = 3 ; j < fields.size(); ++j) {
+      // TODO(wu): Remove when below bug is fixed.
+      // https://bugzilla.mozilla.org/show_bug.cgi?id=996329
+      if (fields[j] == "" && j == fields.size() - 1) {
+        continue;
+      }
+
       int pl = 0;
       if (!GetValueFromString(line, fields[j], &pl, error)) {
         return false;
@@ -2160,6 +2182,7 @@ bool ParseMediaDescription(const std::string& message,
         codec_port.SetParam(cricket::kCodecParamPort, fields[3]);
         LOG(INFO) << "ParseMediaDescription: Got SCTP Port Number "
                   << fields[3];
+        ASSERT(!desc->HasCodec(cricket::kGoogleSctpDataCodecId));
         desc->AddCodec(codec_port);
       }
 

@@ -40,6 +40,8 @@ const float kLowSystemCpuThreshold = 0.65f;
 const float kProcessCpuThreshold = 0.10f;
 
 const char kRtxCodecName[] = "rtx";
+const char kRedCodecName[] = "red";
+const char kUlpfecCodecName[] = "ulpfec";
 
 // RTP payload type is in the 0-127 range. Use 128 to indicate "all" payload
 // types.
@@ -85,6 +87,7 @@ const char kRtcpFbParamCcm[] = "ccm";
 const char kRtcpFbCcmParamFir[] = "fir";
 const char kCodecParamMaxBitrate[] = "x-google-max-bitrate";
 const char kCodecParamMinBitrate[] = "x-google-min-bitrate";
+const char kCodecParamStartBitrate[] = "x-google-start-bitrate";
 const char kCodecParamMaxQuantization[] = "x-google-max-quantization";
 const char kCodecParamPort[] = "x-google-port";
 
